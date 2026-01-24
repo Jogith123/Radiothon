@@ -9,6 +9,7 @@ const { connectToMongoDB, closeConnection, isConnected } = require('./database/c
 const { initializeGemini, isInitialized: isGeminiInitialized, generateAnswer, generateSummary } = require('./services/geminiService');
 const { initializeTTS, initializeSTT, textToSpeechConvert, transcribeAudio } = require('./services/speechService');
 const { storeQuestionAndAnswer, getHistoryBySubject, getUserStats } = require('./services/historyService');
+const { initializeTranslation, detectLanguage, translateText, isTranslationAvailable } = require('./services/translationService');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -21,19 +22,22 @@ app.use('/audio', express.static(path.join(__dirname, 'audio')));
 // Initialize all services
 async function initializeServices() {
   console.log('🚀 Initializing Vidya Vani services...\n');
-  
+
   // Initialize Gemini AI
   initializeGemini();
-  
+
   // Initialize Google TTS
   initializeTTS();
-  
+
   // Initialize Google STT
   initializeSTT();
-  
+
+  // Initialize Google Translation
+  initializeTranslation();
+
   // Initialize MongoDB
   await connectToMongoDB();
-  
+
   console.log('\n✅ All services initialized\n');
 }
 
@@ -45,13 +49,14 @@ app.post('/ivr/welcome', (req, res) => {
   const callSid = req.body.CallSid;
   const fromNumber = req.body.From;
   console.log(`📞 Incoming call: ${callSid} from ${fromNumber}`);
-  
+
   // Initialize session
   userSessions.set(callSid, {
     questions: [],
     currentQuestion: null,
     state: 'welcome',
-    fromNumber: fromNumber
+    fromNumber: fromNumber,
+    language: 'en-US'  // Default to English, auto-detected from speech
   });
 
   const twiml = new VoiceResponse();
@@ -117,7 +122,7 @@ async function askQuestion(callSid, req) {
   userSessions.set(callSid, session);
 
   const twiml = new VoiceResponse();
-  
+
   twiml.say(
     'Please ask your educational question after the beep. Press 2 to stop recording.',
     { voice: 'Polly.Joanna', language: 'en-US' }
@@ -138,7 +143,7 @@ async function askQuestion(callSid, req) {
 // Stop recording handler (when user presses 2)
 function stopRecording(callSid, req) {
   const twiml = new VoiceResponse();
-  
+
   twiml.say(
     'Recording stopped. Your question is being processed. Please press 3 to hear the answer.',
     { voice: 'Polly.Joanna', language: 'en-US' }
@@ -165,7 +170,7 @@ app.post('/ivr/question-recorded', async (req, res) => {
   const recordingUrl = req.body.RecordingUrl;
   console.log(`✅ Recording completed for call: ${callSid}`);
   console.log(`📼 Recording URL: ${recordingUrl}`);
-  
+
   const session = userSessions.get(callSid) || {};
   session.lastRecordingUrl = recordingUrl;
   session.state = 'processing_transcription';
@@ -199,19 +204,42 @@ app.post('/ivr/question-recorded', async (req, res) => {
   res.send(twiml.toString());
 });
 
-// Process transcription asynchronously
+// Process transcription asynchronously with translation support
 async function processTranscription(recordingUrl, callSid) {
   try {
-    const transcriptionText = await transcribeAudio(recordingUrl, callSid);
-    
-    // Save transcription to session
     const session = userSessions.get(callSid) || {};
-    session.currentQuestion = transcriptionText;
-    session.questions.push(transcriptionText);
+
+    // Get user's preferred language (default to English)
+    const userLanguage = session.language || 'en-US';
+
+    // Transcribe with language specification
+    const transcriptionResult = await transcribeAudio(recordingUrl, callSid, userLanguage);
+    const transcriptionText = transcriptionResult.text;
+    const detectedLanguage = transcriptionResult.detectedLanguage;
+
+    console.log(`📝 Transcribed: "${transcriptionText}" (Language: ${detectedLanguage})`);
+
+    // Extract language code (remove country code: 'te-IN' → 'te')
+    const langCode = detectedLanguage.split('-')[0];
+
+    // If not English, translate to English for AI processing
+    let questionForAI = transcriptionText;
+    if (langCode !== 'en') {
+      console.log(`🌐 Translating ${langCode} → English for AI processing...`);
+      questionForAI = await translateText(transcriptionText, 'en', langCode);
+      console.log(`📝 Translated question: "${questionForAI}"`);
+    }
+
+    // Save both original and translated to session
+    session.currentQuestion = questionForAI;           // English for AI
+    session.originalQuestion = transcriptionText;      // Original language
+    session.questionLanguage = langCode;               // Language code ('te', 'hi', etc.)
+    session.detectedLanguageCode = detectedLanguage;   // Full code ('te-IN', etc.)
+    session.questions.push(questionForAI);
     session.state = 'transcription_complete';
     userSessions.set(callSid, session);
-    
-    console.log(`✅ Question saved to session for ${callSid}`);
+
+    console.log(`✅ Question saved: "${questionForAI}" (from ${langCode})`);
   } catch (error) {
     console.error(`❌ Transcription error for ${callSid}:`, error.message);
     // Set a fallback message
@@ -225,9 +253,9 @@ async function processTranscription(recordingUrl, callSid) {
 app.post('/ivr/transcription', async (req, res) => {
   const callSid = req.body.CallSid;
   const transcriptionText = req.body.TranscriptionText;
-  
+
   console.log(`📝 Twilio transcription received for ${callSid}: "${transcriptionText}"`);
-  
+
   const session = userSessions.get(callSid) || {};
   // Only use Twilio transcription if Google STT hasn't already processed it
   if (!session.currentQuestion) {
@@ -281,32 +309,48 @@ async function getAnswer(callSid, req) {
       return twiml.toString();
     }
 
-    // Get answer from Gemini AI
+    // Get answer from Gemini AI (in English)
     twiml.say(
       'Processing your question with AI. Please wait.',
       { voice: 'Polly.Joanna', language: 'en-US' }
     );
 
     console.log(`🤖 Sending to Gemini: ${question}`);
-    const answer = await generateAnswer(question);
+    const answerEnglish = await generateAnswer(question);
 
-    console.log(`🤖 Question: ${question}`);
-    console.log(`🤖 Answer: ${answer}`);
+    console.log(`🤖 Answer (English): ${answerEnglish}`);
 
-    // Store answer in session
-    session.lastAnswer = answer;
-    userSessions.set(callSid, session);
+    // Get user's language from session
+    const questionLanguage = session.questionLanguage || 'en';
+    const detectedLanguageCode = session.detectedLanguageCode || 'en-US';
 
-    // Classify subject and store in MongoDB
-    if (isConnected()) {
-      await storeQuestionAndAnswer(session.fromNumber, question, answer);
+    // Translate answer back to user's language if needed
+    let answerInUserLanguage = answerEnglish;
+    if (questionLanguage !== 'en') {
+      console.log(`🌐 Translating answer: English → ${questionLanguage}...`);
+      answerInUserLanguage = await translateText(answerEnglish, questionLanguage, 'en');
+      console.log(`📝 Answer (${questionLanguage}): ${answerInUserLanguage}`);
     }
 
-    // Convert answer to speech using Google TTS
-    const audioFileName = await textToSpeechConvert(answer, callSid);
+    // Store answer in session
+    session.lastAnswer = answerEnglish;              // English version
+    session.lastAnswerTranslated = answerInUserLanguage;  // User's language
+    userSessions.set(callSid, session);
+
+    // Classify and store (using English question and answer)
+    if (isConnected()) {
+      await storeQuestionAndAnswer(session.fromNumber, question, answerEnglish);
+    }
+
+    // Convert translated answer to speech in user's language
+    const audioFileName = await textToSpeechConvert(
+      answerInUserLanguage,
+      callSid,
+      detectedLanguageCode  // Use full language code (e.g., 'te-IN')
+    );
 
     if (audioFileName) {
-      // Play the generated audio
+      // Play the generated audio in user's language
       const audioUrl = `${process.env.BASE_URL}/audio/${audioFileName}`;
       twiml.play(audioUrl);
     } else {
@@ -410,12 +454,12 @@ app.post('/ivr/process-summary', async (req, res) => {
   try {
     // Transcribe the subject name
     let subjectName = 'Physics'; // Default fallback
-    
+
     if (recordingUrl) {
       try {
         const transcribedText = await transcribeAudio(recordingUrl, callSid);
         console.log(`📝 Subject name transcribed: "${transcribedText}"`);
-        
+
         // Extract just the subject name (remove phrases like "give me summary", "I want summary", etc.)
         subjectName = extractSubjectName(transcribedText);
         console.log(`📚 Extracted subject: "${subjectName}"`);
@@ -427,7 +471,7 @@ app.post('/ivr/process-summary', async (req, res) => {
     // Fetch last 5 questions for this subject (exclude summary requests)
     console.log(`🔍 Fetching history for subject: "${subjectName}" from user: ${fromNumber}`);
     const history = await getHistoryBySubject(fromNumber, subjectName, 5);
-    
+
     console.log(`📊 Found ${history.length} questions for "${subjectName}"`);
     if (history.length > 0) {
       console.log(`📋 First question: "${history[0].question.substring(0, 50)}..."`);
@@ -437,7 +481,7 @@ app.post('/ivr/process-summary', async (req, res) => {
       // Get all available subjects for this user
       const stats = await getUserStats(fromNumber);
       console.log(`📚 User's available subjects: ${stats.subjectStats.map(s => s._id).join(', ')}`);
-      
+
       twiml.say(
         `You have not asked any questions about ${subjectName} yet. Please ask some questions first, then request a summary.`,
         { voice: 'Polly.Joanna', language: 'en-US' }
@@ -508,9 +552,9 @@ function extractSubjectName(text) {
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/[.,!?;:]+$/g, '');  // Remove trailing punctuation
-  
+
   if (!cleanText) return 'Physics';
-  
+
   // Subject name mapping for common variations
   const subjectMapping = {
     'math': 'Mathematics',
@@ -544,20 +588,20 @@ function extractSubjectName(text) {
     'general knowledge': 'General Knowledge',
     'science': 'General Science'
   };
-  
+
   // Normalize by checking mapping first
   const normalized = subjectMapping[cleanText];
   if (normalized) {
     console.log(`🔄 Normalized "${text}" to "${normalized}"`);
     return normalized;
   }
-  
+
   // Capitalize first letter of each word if no mapping found
   const capitalized = cleanText
     .split(' ')
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
-  
+
   console.log(`📚 Using capitalized: "${capitalized}"`);
   return capitalized;
 }
@@ -598,8 +642,8 @@ function redirectWelcome() {
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
+  res.json({
+    status: 'ok',
     timestamp: new Date().toISOString(),
     services: {
       gemini: isGeminiInitialized(),
@@ -627,7 +671,7 @@ process.on('SIGINT', async () => {
 // Start server
 async function startServer() {
   await initializeServices();
-  
+
   app.listen(PORT, () => {
     console.log(`🚀 Server is running on port ${PORT}`);
     console.log(`📞 Twilio webhook URL: ${process.env.BASE_URL || `http://localhost:${PORT}`}/ivr/welcome`);

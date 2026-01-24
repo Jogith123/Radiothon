@@ -74,12 +74,13 @@ function isSTTAvailable() {
 }
 
 /**
- * Convert text to speech using Google TTS
+ * Convert text to speech using Google TTS with language support
  * @param {string} text - Text to convert
  * @param {string} callSid - Call SID for file naming
+ * @param {string} languageCode - Language code (e.g., 'te-IN', 'en-US', 'hi-IN', 'ta-IN')
  * @returns {Promise<string|null>} Audio file name or null if failed
  */
-async function textToSpeechConvert(text, callSid) {
+async function textToSpeechConvert(text, callSid, languageCode = 'en-US') {
   // If TTS client is not available, return null to use Twilio TTS
   if (!ttsClient) {
     console.log('Using Twilio TTS fallback');
@@ -93,11 +94,23 @@ async function textToSpeechConvert(text, callSid) {
       fs.mkdirSync(audioDir, { recursive: true });
     }
 
+    // Voice mapping for different languages
+    const voiceMap = {
+      'en-US': 'en-US-Neural2-F',          // English (US) - Female
+      'te-IN': 'te-IN-Standard-A',         // Telugu (India) - Female
+      'hi-IN': 'hi-IN-Neural2-A',          // Hindi (India) - Female
+      'ta-IN': 'ta-IN-Standard-A',         // Tamil (India) - Female
+      'kn-IN': 'kn-IN-Standard-A',         // Kannada (India) - Female
+      'ml-IN': 'ml-IN-Standard-A'          // Malayalam (India) - Female
+    };
+
+    const voiceName = voiceMap[languageCode] || voiceMap['en-US'];
+
     const request = {
       input: { text: text },
       voice: {
-        languageCode: 'en-US',
-        name: 'en-US-Neural2-F',
+        languageCode: languageCode,
+        name: voiceName,
         ssmlGender: 'FEMALE'
       },
       audioConfig: {
@@ -112,7 +125,7 @@ async function textToSpeechConvert(text, callSid) {
     const filePath = path.join(audioDir, fileName);
 
     await util.promisify(fs.writeFile)(filePath, response.audioContent, 'binary');
-    console.log(`Audio content written to file: ${fileName}`);
+    console.log(`🔊 TTS audio generated: ${fileName} (${languageCode})`);
 
     // Clean up old audio files (older than 1 hour)
     cleanupOldAudioFiles(audioDir);
@@ -125,15 +138,16 @@ async function textToSpeechConvert(text, callSid) {
 }
 
 /**
- * Transcribe audio using Google Speech-to-Text
+ * Transcribe audio using Google Speech-to-Text with language support
  * @param {string} recordingUrl - URL of the recording
  * @param {string} callSid - Call SID for logging
- * @returns {Promise<string>} Transcribed text
+ * @param {string} languageCode - Language code (e.g., 'te-IN' for Telugu, 'en-US' for English)
+ * @returns {Promise<Object>} { text: string, detectedLanguage: string }
  */
-async function transcribeAudio(recordingUrl, callSid) {
+async function transcribeAudio(recordingUrl, callSid, languageCode = 'te-IN') {
   try {
-    console.log(`🎙️ Starting transcription for ${callSid}...`);
-    
+    console.log(`🎙️ Starting transcription for ${callSid} (Language: ${languageCode})...`);
+
     // Download the audio file from Twilio
     const audioResponse = await axios({
       method: 'get',
@@ -149,38 +163,74 @@ async function transcribeAudio(recordingUrl, callSid) {
     console.log(`📥 Downloaded audio: ${audioBuffer.length} bytes`);
 
     let transcriptionText = '';
+    let detectedLanguage = 'en-US';
 
     // Use Google Speech-to-Text if available
     if (sttClient) {
-      console.log(`🔊 Using Google Speech-to-Text for ${callSid}`);
-      
-      const request = {
-        audio: {
-          content: audioBuffer.toString('base64')
-        },
-        config: {
-          encoding: 'LINEAR16',
-          sampleRateHertz: 8000,
-          languageCode: 'en-US',
-          enableAutomaticPunctuation: true,
-          model: 'phone_call',
-          useEnhanced: true
-        }
-      };
+      console.log(`🔊 Using Google Speech-to-Text for ${callSid} with auto-detection`);
 
-      const [response] = await sttClient.recognize(request);
-      const transcription = response.results
-        .map(result => result.alternatives[0].transcript)
-        .join('\n');
-      
-      transcriptionText = transcription;
-      console.log(`📝 Google STT transcription: "${transcriptionText}"`);
+      // Supported languages for multi-language detection
+      const supportedLanguages = ['en-US', 'hi-IN', 'ta-IN', 'te-IN'];
+
+      let bestTranscription = '';
+      let bestLanguage = 'en-US';
+      let bestConfidence = 0;
+
+      // Try each supported language and pick the best result
+      for (const lang of supportedLanguages) {
+        try {
+          const request = {
+            audio: {
+              content: audioBuffer.toString('base64')
+            },
+            config: {
+              encoding: 'LINEAR16',
+              sampleRateHertz: 8000,
+              languageCode: lang,
+              enableAutomaticPunctuation: true
+            }
+          };
+
+          const [response] = await sttClient.recognize(request);
+
+          if (response.results && response.results.length > 0) {
+            const result = response.results[0];
+            const confidence = result.alternatives[0].confidence || 0;
+            const text = result.alternatives[0].transcript;
+
+            console.log(`  📝 ${lang}: "${text}" (confidence: ${confidence.toFixed(2)})`);
+
+            // Select the transcription with highest confidence
+            if (confidence > bestConfidence) {
+              bestConfidence = confidence;
+              bestTranscription = text;
+              bestLanguage = lang;
+            }
+          }
+        } catch (err) {
+          console.log(`  ⚠️ ${lang}: Failed - ${err.message}`);
+        }
+      }
+
+      if (bestTranscription) {
+        transcriptionText = bestTranscription;
+        detectedLanguage = bestLanguage;
+        console.log(`✅ Best match: ${bestLanguage} with confidence ${bestConfidence.toFixed(2)}`);
+      } else {
+        throw new Error('No transcription results from any language');
+      }
+
+      console.log(`📝 Final transcription: "${transcriptionText}"`);
+      console.log(`🌐 Detected language: ${detectedLanguage}`);
     } else {
-      console.log(`⚠️ Google STT not available, transcription may be less accurate`);
+      console.log(`⚠️ Google STT not available`);
       throw new Error('STT not available');
     }
 
-    return transcriptionText;
+    return {
+      text: transcriptionText,
+      detectedLanguage: detectedLanguage
+    };
   } catch (error) {
     console.error(`❌ Transcription error for ${callSid}:`, error.message);
     throw error;
