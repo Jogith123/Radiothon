@@ -1,4 +1,4 @@
-# **VIDYA VANI**
+ # **VIDYA VANI**
 
 ### *Knowledge at Your Call*
 
@@ -26,7 +26,46 @@ The system bridges the digital divide by providing 24/7 educational support to s
 
 ## 🏗️ Technology Stack & Architecture
 
-*(same diagram and explanation as before)*
+### **Why We Chose Each Technology**
+
+┌─────────────────────────────────────────────────────────┐
+│                    USER (Phone Call)                     │
+└────────────────────────┬────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│                   TWILIO VOICE API                       │
+│  Why: Industry-leading telephony platform                │
+│  - Reliable call routing and management                  │
+│  - Built-in audio recording                              │
+│  - Global phone number support                           │
+│  - Easy webhook integration                              │
+└────────────────────────┬────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│              NODE.JS + EXPRESS.JS SERVER                 │
+│  Why: Perfect for real-time, event-driven applications   │
+│  - Non-blocking I/O for concurrent calls                 │
+│  - Lightweight and fast                                  │
+│  - Rich ecosystem of packages                            │
+│  - Easy API integration                                  │
+└────────────────────────┬────────────────────────────────┘
+                         │
+         ┌───────────────┼───────────────┬───────────────┐
+         │               │               │               │
+         ▼               ▼               ▼               ▼
+┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+│   GOOGLE     │ │   GOOGLE     │ │   GOOGLE     │ │   MONGODB    │
+│ SPEECH-TO-   │ │  GEMINI AI   │ │  TEXT-TO-    │ │   DATABASE   │
+│    TEXT      │ │              │ │   SPEECH     │ │              │
+└──────────────┘ └──────────────┘ └──────────────┘ └──────────────┘
+│ Transcribes  │ │ Generates    │ │ Converts     │ │ Stores Q&A   │
+│ voice to     │ │ answers &    │ │ text to      │ │ history with │
+│ text         │ │ classifies   │ │ natural      │ │ subject      │
+│              │ │ subjects     │ │ speech       │ │ classification│
+└──────────────┘ └──────────────┘ └──────────────┘ └──────────────┘
+
 
 ---
 
@@ -36,9 +75,11 @@ The system bridges the digital divide by providing 24/7 educational support to s
 ```bash
 cd Vidya-Vani/twilio-phone-call
 npm install
-Step 2: Configure Environment
-bash
+```
+### **Step 2: Configure Environment
+```bash
 cp .env.example .env
+```
 Edit .env with the following:
 
 TWILIO_ACCOUNT_SID
@@ -53,25 +94,28 @@ MONGODB_URI=mongodb://localhost:27017/vidya-vani
 
 LANGUAGE=en-IN (Options: en-IN, hi-IN, te-IN, etc.)
 
-Step 3: Setup MongoDB
-(same as previous)
+### **Step 3: Setup MongoDB
+Local or Atlas setup with test via npm run test-mongodb
 
-Step 4: Add Google Credentials
-Ensure Speech-to-Text and Text-to-Speech APIs are enabled for multiple languages
+### **Step 4: Add Google Credentials
 
-Update GOOGLE_TTS_KEY_FILE path in .env
+Place google-credentials.json and enable STT and TTS APIs
 
-Step 5: Start ngrok
-bash
+### **Step 5: Start ngrok
+```bash
 ngrok http 3000
+```
+
 Step 6: Configure Twilio Webhook
-bash
-# Go to Twilio Console → Phone Numbers → Webhook
-# Set to: https://<your-ngrok>.ngrok.io/ivr/welcome
+# Twilio → Phone Numbers → Webhook: https://<ngrok>.ngrok.io/ivr/welcome
+
 Step 7: Start Server
-bash
+```bash
 npm run server
+```
+
 🌐 Multi-Language Support
+
 Vidya Vani supports:
 
 English (en-IN)
@@ -92,29 +136,43 @@ Gemini generates response
 
 Google TTS replies in the same language
 
-To switch languages, update LANGUAGE in your .env:
+To switch languages, update .env:
 
-env
-Copy code
-LANGUAGE=hi-IN  # For Hindi
+LANGUAGE=hi-IN
+
 📱 How to Use
-(same call flow and options)
+Phone Menu:
+
+Press 1 – Ask a question
+
+Press 2 – Stop recording
+
+Press 3 – Get answer
+
+Press 4 – Summary
+
+Press 9 – End call
 
 📚 MongoDB Features
-(same classification, history, and summaries)
+
+Subject classification (Physics, Chemistry, etc.)
+
+Timestamped Q&A history
+
+AI-powered learning summaries by subject
 
 🎓 Educational Impact
-Vidya Vani aims to democratize education by:
 
-Reaching students without internet access
+Vidya Vani democratizes AI-driven education by:
 
-Supporting multiple native languages
+Reaching non-internet users
 
-Providing 24/7 learning help
+Supporting native languages
 
-Reducing the cost barrier to AI education
-
-Knowledge at Your Call – in your own language, anywhere in the world.
+Offering 24/7 voice-based learning
 
 Built with ❤️ for inclusive and multilingual education
- 
+
+
+Let me know if you want this in `.txt`, `.pdf`, or presentation format too.
+
