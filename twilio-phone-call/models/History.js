@@ -7,13 +7,13 @@ const { getDatabase } = require('../database/connection');
 
 /**
  * History document schema
+ * Each question/answer pair is stored as a separate document
  * @typedef {Object} HistoryDocument
  * @property {string} user_id - User's phone number (caller's number, not Twilio number)
  * @property {string} subject - Question subject (automatically classified: Math, Physics, Chemistry, Biology, History, Geography, Computer Science, English, Economics, Political Science, Environmental Science, General Knowledge, etc.)
- * @property {Array<string>} qs - Array of all questions asked on this subject by this user
- * @property {string} question - Latest question text
- * @property {string} response - Latest AI-generated response
- * @property {Date} timestamp - When last updated
+ * @property {string} question - Question text
+ * @property {string} response - AI-generated response
+ * @property {Date} timestamp - When the question was asked
  */
 
 class History {
@@ -74,10 +74,10 @@ class History {
 
     // Escape special regex characters in subject name
     const escapedSubject = subject.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    
+
     return await collection
-      .find({ 
-        user_id: userId, 
+      .find({
+        user_id: userId,
         subject: { $regex: new RegExp(escapedSubject, 'i') }
       })
       .sort({ timestamp: -1 })
@@ -98,12 +98,14 @@ class History {
 
     return await collection.aggregate([
       { $match: { user_id: userId } },
-      { $group: { 
-          _id: '$subject', 
+      {
+        $group: {
+          _id: '$subject',
           count: { $sum: 1 },
           lastQuestion: { $last: '$question' },
           lastTimestamp: { $last: '$timestamp' }
-      }},
+        }
+      },
       { $sort: { count: -1 } }
     ]).toArray();
   }
@@ -167,7 +169,6 @@ class History {
     return {
       user_id: userId,
       subject: subject,
-      qs: [question],
       question: question,
       response: response,
       timestamp: new Date()
@@ -175,54 +176,24 @@ class History {
   }
 
   /**
-   * Update or insert question for a user and subject
-   * If document exists for user+subject, adds question to qs array
-   * Otherwise creates new document
+   * Insert a new question and answer record
+   * Creates a separate document for each Q&A to enable querying last 5 questions
    * @param {string} userId - User's phone number
    * @param {string} subject - Question subject
    * @param {string} question - User's question
    * @param {string} response - AI response
-   * @returns {Promise<Object>} Update result
+   * @returns {Promise<Object>} Insert result
    */
-  static async upsertQuestion(userId, subject, question, response) {
+  static async insertQuestion(userId, subject, question, response) {
     const collection = this.getCollection();
     if (!collection) {
       throw new Error('Database not connected');
     }
 
-    return await collection.updateOne(
-      { user_id: userId, subject: subject },
-      {
-        $push: { qs: question },
-        $set: {
-          question: question,
-          response: response,
-          timestamp: new Date()
-        }
-      },
-      { upsert: true }
-    );
+    const document = this.createDocument(userId, subject, question, response);
+    return await collection.insertOne(document);
   }
 
-  /**
-   * Get all questions for a user and subject
-   * @param {string} userId - User's phone number
-   * @param {string} subject - Subject name
-   * @returns {Promise<Array<string>>} Array of questions
-   */
-  static async getQuestionsBySubject(userId, subject) {
-    const collection = this.getCollection();
-    if (!collection) {
-      return [];
-    }
-
-    const doc = await collection.findOne({ 
-      user_id: userId, 
-      subject: { $regex: new RegExp(`^${subject}$`, 'i') }
-    });
-
-    return doc ? doc.qs || [] : [];
-  }
 }
 
 module.exports = History;
