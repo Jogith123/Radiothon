@@ -56,7 +56,7 @@ async function generateAnswer(question) {
   }
 
   const prompt = `You are an educational assistant. Answer this question clearly and concisely in 2-3 sentences suitable for voice response: ${question}`;
-  
+
   const result = await model.generateContent(prompt);
   const response = await result.response;
   return response.text();
@@ -101,11 +101,11 @@ Instructions:
 5. Be specific - don't use "Other" unless absolutely necessary
 
 Subject:`;
-    
+
     const result = await model.generateContent(classifyPrompt);
     const response = await result.response;
     const subject = response.text().trim();
-    
+
     console.log(`📚 Classified subject: ${subject}`);
     return subject;
   } catch (error) {
