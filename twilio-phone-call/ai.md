@@ -1,74 +1,150 @@
-# AI-Assisted Development
+# AI-Assisted Development Disclosure
 
-This document lists all files that were created or significantly modified with AI assistance.
+This document transparently records all files, features, and architectural components that were **created or significantly modified with AI assistance**.  
+It follows best practices for academic, hackathon, and industry-level AI usage disclosure.
+
+---
 
 ## Created by AI
 
 ### Services
-- **`services/translationService.js`** - Google Cloud Translation API integration for multi-language support
+- **`services/translationService.js`**  
+  Google Cloud Translation API integration enabling multilingual input/output with confidence-based language detection.
+
+- **`services/ragService.js`**  
+  Retrieval-Augmented Generation (RAG) service for grounding AI responses using curated, domain-specific knowledge sources.
+
+---
 
 ## Modified by AI
 
 ### Core Application
-- **`server.js`** - Added multi-language translation workflow integration, updated session management, and modified transcription/answer processing
+- **`server.js`**  
+  - Integrated multilingual workflow (STT → Translation → AI → Translation → TTS)  
+  - Added Retrieval-Augmented Generation (RAG) pipeline before AI response generation  
+  - Updated session and context handling for retrieved knowledge injection  
 
 ### Services
-- **`services/speechService.js`** - Implemented automatic language detection, multi-language STT/TTS support, and voice mapping for Telugu, Hindi, Tamil, and English
-- **`services/historyService.js`** - Updated to use new `insertQuestion` method for storing individual Q&A pairs
-- **`services/geminiService.js`** - Minor improvements to AI response handling
+- **`services/speechService.js`**  
+  - Automatic language detection  
+  - Multi-language Speech-to-Text and Text-to-Speech support  
+  - Native voice mapping for Telugu, Hindi, Tamil, and English  
+
+- **`services/historyService.js`**  
+  - Migrated to `insertQuestion` for atomic Q&A storage  
+  - Enabled efficient retrieval of recent interactions for summaries and RAG context  
+
+- **`services/geminiService.js`**  
+  - Improved prompt structuring  
+  - Added support for grounded responses using retrieved documents  
 
 ### Models
-- **`models/History.js`** - Redesigned database schema to store each Q&A as separate documents, replaced `upsertQuestion` with `insertQuestion`, removed obsolete methods
+- **`models/History.js`**  
+  - Redesigned schema to store each Q&A as a separate document  
+  - Replaced `upsertQuestion` with `insertQuestion`  
+  - Optimized for chronological and contextual retrieval  
 
 ### Testing
-- **`test-mongodb.js`** - Added comprehensive Test 8 for validating last 5 questions summary feature
-
-## Features Implemented
-
-### 1. Summary Feature Fix
-**Objective**: Enable retrieval of last 5 questions per subject for comprehensive summaries
-
-**Changes**:
-- Changed from single document per user+subject to one document per Q&A
-- Implemented `insertQuestion` method replacing `upsertQuestion`
-- Added test suite for 5-question retrieval
-- Updated history service to use new storage method
-
-**Files**: `models/History.js`, `services/historyService.js`, `test-mongodb.js`
-
-### 2. Multi-Language Support
-**Objective**: Support Telugu, Hindi, Tamil, and English with automatic detection and translation
-
-**Changes**:
-- Created translation service using Google Cloud Translation API
-- Implemented automatic language detection with confidence scoring
-- Added multi-language STT (Speech-to-Text) with language-specific models
-- Added multi-language TTS (Text-to-Speech) with native voice mapping
-- Integrated translation before/after Gemini AI processing
-- Workflow: Spoken Language → English (AI) → Spoken Language (Response)
-
-**Files**: `services/translationService.js`, `services/speechService.js`, `server.js`
-
-**Supported Languages**:
-- English (en-US) - Neural2-F voice
-- Telugu (te-IN) - Standard-A voice
-- Hindi (hi-IN) - Neural2-A voice
-- Tamil (ta-IN) - Standard-A voice
-
-## AI Tools Used
-
-- **Google Gemini AI** - For generating educational answers
-- **Google Cloud Translation** - For language translation
-- **Google Cloud Speech-to-Text** - For voice transcription
-- **Google Cloud Text-to-Speech** - For response audio generation
-
-## Development Timeline
-
-1. **Project Analysis** - Analyzed existing codebase and documented architecture
-2. **Summary Feature** - Fixed database schema for last 5 questions retrieval
-3. **Multi-Language Support** - Implemented automatic language detection and translation workflow
-4. **Testing & Validation** - Created comprehensive tests and verified functionality
+- **`test-mongodb.js`**  
+  - Added Test 8 to validate retrieval of the last 5 questions per subject  
+  - Verified compatibility with summary and RAG workflows  
 
 ---
 
-*This project uses AI assistance to build an accessible educational platform for voice-based learning in multiple Indian languages.*
+## Features Implemented
+
+---
+
+### 1. Summary Feature (Fixed & Optimized)
+
+**Objective**  
+Enable accurate summaries based on the **last 5 questions per subject**.
+
+**Key Changes**
+- One document per Q&A instead of overwriting  
+- Deterministic retrieval using timestamps  
+- Dedicated automated testing  
+
+**Files Involved**  
+`models/History.js`, `services/historyService.js`, `test-mongodb.js`
+
+---
+
+### 2. Multi-Language Voice AI Support
+
+**Objective**  
+Deliver a seamless voice-first learning experience in multiple Indian languages.
+
+**Workflow**  
+Spoken Language → STT → Translation → AI Reasoning → Translation → TTS → Spoken Response
+
+**Capabilities**
+- Automatic language detection with confidence scoring  
+- Language-specific STT models  
+- Native voice synthesis for responses  
+
+**Supported Languages**
+- English (`en-US`) – Neural2-F  
+- Telugu (`te-IN`) – Standard-A  
+- Hindi (`hi-IN`) – Neural2-A  
+- Tamil (`ta-IN`) – Standard-A  
+
+**Files Involved**  
+`services/translationService.js`, `services/speechService.js`, `server.js`
+
+---
+
+### 3. Retrieval-Augmented Generation (RAG)
+
+**Objective**  
+Ensure **fact-grounded, curriculum-aligned, and hallucination-resistant AI responses**.
+
+**RAG Architecture**
+1. User query is transcribed and normalized  
+2. Relevant knowledge chunks are retrieved from curated sources  
+3. Retrieved context is injected into the AI prompt  
+4. AI generates responses grounded strictly in retrieved data  
+
+**Benefits**
+- Reduced hallucinations  
+- Improved factual accuracy  
+- Domain- and syllabus-specific answers  
+- Improved explainability and trust  
+
+**Files Involved**  
+`services/ragService.js`, `services/geminiService.js`, `server.js`
+
+---
+
+## AI Tools & Technologies Used
+
+- **Google Gemini AI** – Educational answer generation  
+- **Retrieval-Augmented Generation (RAG)** – Knowledge-grounded response architecture  
+- **Google Cloud Translation API** – Multilingual translation  
+- **Google Cloud Speech-to-Text** – Voice transcription  
+- **Google Cloud Text-to-Speech** – Audio response generation  
+
+---
+
+## Development Lifecycle
+
+1. System analysis and architecture review  
+2. Data model refactor for multi-question summaries  
+3. Multilingual voice AI pipeline integration  
+4. Retrieval-Augmented Generation (RAG) integration  
+5. Comprehensive testing and validation  
+
+---
+
+## Responsible AI Statement
+
+AI is used strictly as an **assistive development and response-generation tool**.  
+All AI outputs are:
+- Context-aware and knowledge-grounded  
+- Logged and auditable  
+- Designed for educational assistance only  
+- Not used for autonomous or high-risk decision-making  
+
+---
+
+*This project demonstrates responsible, transparent, and production-grade use of AI to build a multilingual, voice-first educational platform tailored for Indian learners.*
