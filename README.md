@@ -1,4 +1,4 @@
- # **VIDYA VANI**
+# **VIDYA VANI**
 
 ### *Knowledge at Your Call*
 
@@ -28,6 +28,7 @@ The system bridges the digital divide by providing 24/7 educational support to s
 
 ### **Why We Chose Each Technology**
 
+```
 ┌─────────────────────────────────────────────────────────┐
 │                    USER (Phone Call)                     │
 └────────────────────────┬────────────────────────────────┘
@@ -35,21 +36,11 @@ The system bridges the digital divide by providing 24/7 educational support to s
                          ▼
 ┌─────────────────────────────────────────────────────────┐
 │                   TWILIO VOICE API                       │
-│  Why: Industry-leading telephony platform                │
-│  - Reliable call routing and management                  │
-│  - Built-in audio recording                              │
-│  - Global phone number support                           │
-│  - Easy webhook integration                              │
 └────────────────────────┬────────────────────────────────┘
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────┐
 │              NODE.JS + EXPRESS.JS SERVER                 │
-│  Why: Perfect for real-time, event-driven applications   │
-│  - Non-blocking I/O for concurrent calls                 │
-│  - Lightweight and fast                                  │
-│  - Rich ecosystem of packages                            │
-│  - Easy API integration                                  │
 └────────────────────────┬────────────────────────────────┘
                          │
          ┌───────────────┼───────────────┬───────────────┐
@@ -60,12 +51,7 @@ The system bridges the digital divide by providing 24/7 educational support to s
 │ SPEECH-TO-   │ │  GEMINI AI   │ │  TEXT-TO-    │ │   DATABASE   │
 │    TEXT      │ │              │ │   SPEECH     │ │              │
 └──────────────┘ └──────────────┘ └──────────────┘ └──────────────┘
-│ Transcribes  │ │ Generates    │ │ Converts     │ │ Stores Q&A   │
-│ voice to     │ │ answers &    │ │ text to      │ │ history with │
-│ text         │ │ classifies   │ │ natural      │ │ subject      │
-│              │ │ subjects     │ │ speech       │ │ classification│
-└──────────────┘ └──────────────┘ └──────────────┘ └──────────────┘
-
+```
 
 ---
 
@@ -76,103 +62,82 @@ The system bridges the digital divide by providing 24/7 educational support to s
 cd Vidya-Vani/twilio-phone-call
 npm install
 ```
-### **Step 2: Configure Environment
+
+### **Step 2: Configure Environment**
 ```bash
 cp .env.example .env
 ```
-Edit .env with the following:
+Edit `.env` with the following:
+- `TWILIO_ACCOUNT_SID`
+- `TWILIO_AUTH_TOKEN`
+- `GEMINI_API_KEY`
+- `GOOGLE_TTS_KEY_FILE=./google-credentials.json`
+- `MONGODB_URI=mongodb://localhost:27017/vidya-vani`
+- `LANGUAGE=en-IN` *(Options: `en-IN`, `hi-IN`, `te-IN`, etc.)*
 
-TWILIO_ACCOUNT_SID
+### **Step 3: Setup MongoDB**
+- Local or Atlas setup with test via `npm run test-mongodb`
 
-TWILIO_AUTH_TOKEN
+### **Step 4: Add Google Credentials**
+- Place `google-credentials.json` and enable STT and TTS APIs
 
-GEMINI_API_KEY
-
-GOOGLE_TTS_KEY_FILE=./google-credentials.json
-
-MONGODB_URI=mongodb://localhost:27017/vidya-vani
-
-LANGUAGE=en-IN (Options: en-IN, hi-IN, te-IN, etc.)
-
-### **Step 3: Setup MongoDB
-Local or Atlas setup with test via npm run test-mongodb
-
-### **Step 4: Add Google Credentials
-
-Place google-credentials.json and enable STT and TTS APIs
-
-### **Step 5: Start ngrok
+### **Step 5: Start ngrok**
 ```bash
 ngrok http 3000
 ```
 
-Step 6: Configure Twilio Webhook
+### **Step 6: Configure Twilio Webhook**
+```bash
 # Twilio → Phone Numbers → Webhook: https://<ngrok>.ngrok.io/ivr/welcome
+```
 
-Step 7: Start Server
+### **Step 7: Start Server**
 ```bash
 npm run server
 ```
 
-🌐 Multi-Language Support
+---
 
-Vidya Vani supports:
+## 🌐 Multi-Language Support
 
-English (en-IN)
+Supported:
+- English (`en-IN`)
+- Hindi (`hi-IN`)
+- Telugu (`te-IN`)
 
-Hindi (hi-IN)
-
-Telugu (te-IN)
-
-More coming soon (Kannada, Tamil, Marathi)
-
-How it works:
-
-User speaks in their language
-
-Google Speech-to-Text transcribes accordingly
-
-Gemini generates response
-
-Google TTS replies in the same language
-
-To switch languages, update .env:
-
+Switch by updating `.env`:
+```env
 LANGUAGE=hi-IN
+```
 
-📱 How to Use
-Phone Menu:
+---
 
-Press 1 – Ask a question
+## 📱 How to Use
 
-Press 2 – Stop recording
+### Phone Menu:
+1. Press 1 – Ask a question  
+2. Press 2 – Stop recording  
+3. Press 3 – Get answer  
+4. Press 4 – Summary  
+5. Press 9 – End call
 
-Press 3 – Get answer
+---
 
-Press 4 – Summary
+## 📚 MongoDB Features
 
-Press 9 – End call
+- Subject classification (Physics, Chemistry, etc.)
+- Timestamped Q&A history
+- AI-powered learning summaries by subject
 
-📚 MongoDB Features
+---
 
-Subject classification (Physics, Chemistry, etc.)
-
-Timestamped Q&A history
-
-AI-powered learning summaries by subject
-
-🎓 Educational Impact
+## 🎓 Educational Impact
 
 Vidya Vani democratizes AI-driven education by:
+- Reaching non-internet users
+- Supporting native languages
+- Offering 24/7 voice-based learning
 
-Reaching non-internet users
+---
 
-Supporting native languages
-
-Offering 24/7 voice-based learning
-
-Built with ❤️ for inclusive and multilingual education
-
-
-Let me know if you want this in `.txt`, `.pdf`, or presentation format too.
-
+**Built with ❤️ for inclusive and multilingual education**
