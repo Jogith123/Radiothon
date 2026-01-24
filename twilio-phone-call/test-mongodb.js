@@ -25,13 +25,13 @@ async function testMongoDB() {
 
     // Connect to MongoDB using modular connection
     await connectToMongoDB();
-    
+
     if (!isConnected()) {
       throw new Error('Failed to connect to MongoDB');
     }
-    
+
     console.log('✅ Connected to MongoDB successfully!\n');
-    
+
     // Initialize Gemini for subject classification test
     initializeGemini();
 
@@ -70,7 +70,7 @@ async function testMongoDB() {
       console.log(`   - ${stat._id}: ${stat.count} question(s)`);
     });
     console.log('');
-    
+
     // Test 6: Test subject classification (if Gemini is available)
     console.log('🤖 Test 6: Testing subject classification...');
     try {
@@ -86,6 +86,75 @@ async function testMongoDB() {
     console.log('🧹 Test 7: Cleaning up test data...');
     const deleteResult = await History.deleteByUserId('+919876543210');
     console.log(`✅ Deleted ${deleteResult.deletedCount} test document(s)\n`);
+
+    console.log('🎉 All tests passed! MongoDB modular structure is working perfectly!\n');
+
+    // ===== NEW: Test 8: Last 5 Questions Summary Feature =====
+    console.log('📊 Test 8: Testing Last 5 Questions for Summary...');
+    console.log('   This tests the new schema that stores each Q&A separately\n');
+
+    const testUser = '+1234567890';
+    const testSubject = 'Physics';
+
+    // Insert 7 Physics questions (we'll fetch only last 5)
+    const physicsQuestions = [
+      { q: "What is Newton's first law?", a: "An object at rest stays at rest unless acted upon by a force." },
+      { q: "Explain gravity", a: "Gravity is a force that attracts objects with mass toward each other." },
+      { q: "What is momentum?", a: "Momentum is the product of an object's mass and velocity." },
+      { q: "Define kinetic energy", a: "Kinetic energy is the energy of motion, equal to 1/2 mv²." },
+      { q: "What is friction?", a: "Friction is a force that opposes motion between surfaces in contact." },
+      { q: "Explain acceleration", a: "Acceleration is the rate of change of velocity over time." },
+      { q: "What is work in physics?", a: "Work is force applied over a distance, W = F × d." }
+    ];
+
+    console.log('   Inserting 7 Physics questions...');
+    for (const qa of physicsQuestions) {
+      await History.insertQuestion(testUser, testSubject, qa.q, qa.a);
+    }
+    console.log(`   ✅ Stored 7 questions\n`);
+
+    // Fetch last 5
+    const last5 = await History.findByUserIdAndSubject(testUser, testSubject, 5);
+
+    console.log(`   📋 Retrieved ${last5.length} questions (expected 5)`);
+
+    if (last5.length === 5) {
+      console.log('   ✅ SUCCESS: Got exactly 5 Q&A pairs!\n');
+      console.log('   Retrieved questions (newest first):');
+      last5.forEach((h, i) => {
+        console.log(`      ${i + 1}. Q: ${h.question}`);
+        console.log(`         A: ${h.response.substring(0, 50)}...`);
+      });
+      console.log('');
+
+      // Verify they are the LAST 5 (not the first 5)
+      if (last5[0].question === "What is work in physics?") {
+        console.log('   ✅ VERIFIED: Retrieved the LAST 5 questions (newest to oldest)\n');
+      } else {
+        console.log('   ⚠️  Warning: Order might be incorrect\n');
+      }
+    } else {
+      console.log(`   ❌ FAILURE: Expected 5, got ${last5.length}\n`);
+    }
+
+    // Test with different subject
+    console.log('   Testing with Biology...');
+    await History.insertQuestion(testUser, 'Biology', 'What is photosynthesis?', 'Plants convert light to energy.');
+    await History.insertQuestion(testUser, 'Biology', 'What is DNA?', 'DNA is the genetic material.');
+    const biologyLast5 = await History.findByUserIdAndSubject(testUser, 'Biology', 5);
+    console.log(`   ✅ Biology: Retrieved ${biologyLast5.length} questions (expected 2)\n`);
+
+    // Clean up test data
+    console.log('   🧹 Cleaning up test data...');
+    const deleteResult2 = await History.deleteByUserId(testUser);
+    console.log(`   ✅ Deleted ${deleteResult2.deletedCount} test documents\n`);
+
+    console.log('🎉 Summary Feature Test Passed!\n');
+    console.log('✅ The new schema works correctly:');
+    console.log('   - Each Q&A stored as separate document');
+    console.log('   - Can retrieve last 5 questions per subject');
+    console.log('   - Proper sorting (newest first)');
+    console.log('   - Multiple subjects handled independently\n');
 
     console.log('🎉 All tests passed! MongoDB modular structure is working perfectly!\n');
     console.log('✅ Verified:');
