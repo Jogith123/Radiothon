@@ -19,8 +19,8 @@ async function storeQuestionAndAnswer(userPhone, question, answer) {
     // Classify the subject
     const subject = await classifySubject(question);
 
-    // Upsert: Add question to qs array or create new document
-    await History.upsertQuestion(userPhone, subject, question, answer);
+    // Insert: Create a new document for this Q&A
+    await History.insertQuestion(userPhone, subject, question, answer);
     console.log(`✅ Stored Q&A in MongoDB - Subject: ${subject} - User: ${userPhone}`);
   } catch (error) {
     console.error('❌ Error storing to MongoDB:', error.message);
@@ -67,7 +67,7 @@ async function getUserStats(userPhone) {
   try {
     const totalQuestions = await History.getQuestionCount(userPhone);
     const subjectStats = await History.getSubjectStats(userPhone);
-    
+
     return {
       totalQuestions,
       subjectStats
