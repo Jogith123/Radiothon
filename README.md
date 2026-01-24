@@ -28,7 +28,7 @@ The system bridges the digital divide by providing 24/7 educational support to s
 
 ### **Why We Chose Each Technology**
 
-![Vidya Vani Demo]("assets/pipeline")
+![Vidya Vani Demo](twilio-phone-call/assets/pipeline.png)
 
 ---
 
