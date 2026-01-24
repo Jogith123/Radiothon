@@ -21,6 +21,8 @@ The system bridges the digital divide by providing 24/7 educational support to s
 - 💾 **NEW:** Question history stored in MongoDB
 - 📚 **NEW:** Automatic subject classification (Physics, Chemistry, Biology, Math)
 - 📊 **NEW:** Learning summaries based on your question history
+-  🧠 **NEW:** Retrieval-Augmented Generation (RAG) to improve accuracy by grounding AI answers in curated educational content
+
 
 ---
 
