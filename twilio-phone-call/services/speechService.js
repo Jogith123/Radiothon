@@ -106,6 +106,9 @@ async function textToSpeechConvert(text, callSid, languageCode = 'en-US') {
 
     const voiceName = voiceMap[languageCode] || voiceMap['en-US'];
 
+    console.log(`🎙️ TTS Request: Language=${languageCode}, Voice=${voiceName}`);
+    console.log(`📝 Text to convert: "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"`);
+
     const request = {
       input: { text: text },
       voice: {
@@ -125,7 +128,7 @@ async function textToSpeechConvert(text, callSid, languageCode = 'en-US') {
     const filePath = path.join(audioDir, fileName);
 
     await util.promisify(fs.writeFile)(filePath, response.audioContent, 'binary');
-    console.log(`🔊 TTS audio generated: ${fileName} (${languageCode})`);
+    console.log(`🔊 TTS audio generated successfully: ${fileName} (Language: ${languageCode}, Voice: ${voiceName})`);
 
     // Clean up old audio files (older than 1 hour)
     cleanupOldAudioFiles(audioDir);
@@ -170,13 +173,15 @@ async function transcribeAudio(recordingUrl, callSid, languageCode = 'te-IN') {
       console.log(`🔊 Using Google Speech-to-Text for ${callSid} with auto-detection`);
 
       // Supported languages for multi-language detection
-      const supportedLanguages = ['en-US', 'hi-IN', 'ta-IN', 'te-IN'];
+      // Order matters: Test English first since it's most common
+      const supportedLanguages = ['en-US', 'te-IN', 'hi-IN', 'ta-IN'];
 
       let bestTranscription = '';
       let bestLanguage = 'en-US';
       let bestConfidence = 0;
+      const languageResults = [];
 
-      // Try each supported language and pick the best result
+      // Try each supported language and collect results
       for (const lang of supportedLanguages) {
         try {
           const request = {
@@ -198,24 +203,58 @@ async function transcribeAudio(recordingUrl, callSid, languageCode = 'te-IN') {
             const confidence = result.alternatives[0].confidence || 0;
             const text = result.alternatives[0].transcript;
 
+            languageResults.push({ lang, text, confidence });
             console.log(`  📝 ${lang}: "${text}" (confidence: ${confidence.toFixed(2)})`);
-
-            // Select the transcription with highest confidence
-            if (confidence > bestConfidence) {
-              bestConfidence = confidence;
-              bestTranscription = text;
-              bestLanguage = lang;
-            }
           }
         } catch (err) {
           console.log(`  ⚠️ ${lang}: Failed - ${err.message}`);
         }
       }
 
-      if (bestTranscription) {
+      if (languageResults.length > 0) {
+        // Sort by confidence descending
+        languageResults.sort((a, b) => b.confidence - a.confidence);
+
+        // Use the highest confidence result if it's significantly confident
+        // Require at least 0.5 confidence to avoid false positives
+        const MIN_CONFIDENCE_THRESHOLD = 0.5;
+        const CONFIDENCE_GAP_THRESHOLD = 0.15; // Difference needed to override English default
+
+        const topResult = languageResults[0];
+        const secondResult = languageResults[1] || { confidence: 0 };
+
+        // If English has decent confidence (>0.6), prefer it
+        const englishResult = languageResults.find(r => r.lang === 'en-US');
+
+        if (englishResult && englishResult.confidence >= 0.6) {
+          // Strong English confidence - use it
+          bestTranscription = englishResult.text;
+          detectedLanguage = englishResult.lang;
+          bestConfidence = englishResult.confidence;
+          console.log(`✅ Selected English (strong confidence: ${englishResult.confidence.toFixed(2)})`);
+        } else if (topResult.confidence >= MIN_CONFIDENCE_THRESHOLD &&
+          (topResult.confidence - secondResult.confidence) >= CONFIDENCE_GAP_THRESHOLD) {
+          // Clear winner with good confidence
+          bestTranscription = topResult.text;
+          detectedLanguage = topResult.lang;
+          bestConfidence = topResult.confidence;
+          console.log(`✅ Selected ${topResult.lang} (confidence: ${topResult.confidence.toFixed(2)}, gap: ${(topResult.confidence - secondResult.confidence).toFixed(2)})`);
+        } else if (englishResult) {
+          // Fallback to English if no clear winner
+          bestTranscription = englishResult.text;
+          detectedLanguage = englishResult.lang;
+          bestConfidence = englishResult.confidence;
+          console.log(`✅ Defaulting to English (ambiguous results: top=${topResult.confidence.toFixed(2)}, gap=${(topResult.confidence - secondResult.confidence).toFixed(2)})`);
+        } else {
+          // No English result, use the best available
+          bestTranscription = topResult.text;
+          detectedLanguage = topResult.lang;
+          bestConfidence = topResult.confidence;
+          console.log(`✅ Using best available ${topResult.lang} (no English detected)`);
+        }
+
+        // Assign the selected transcription to the result variable
         transcriptionText = bestTranscription;
-        detectedLanguage = bestLanguage;
-        console.log(`✅ Best match: ${bestLanguage} with confidence ${bestConfidence.toFixed(2)}`);
       } else {
         throw new Error('No transcription results from any language');
       }

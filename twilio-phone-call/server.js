@@ -324,12 +324,16 @@ async function getAnswer(callSid, req) {
     const questionLanguage = session.questionLanguage || 'en';
     const detectedLanguageCode = session.detectedLanguageCode || 'en-US';
 
+    console.log(`🌐 Language Info: Detected="${detectedLanguageCode}", Code="${questionLanguage}"`);
+
     // Translate answer back to user's language if needed
     let answerInUserLanguage = answerEnglish;
     if (questionLanguage !== 'en') {
       console.log(`🌐 Translating answer: English → ${questionLanguage}...`);
       answerInUserLanguage = await translateText(answerEnglish, questionLanguage, 'en');
       console.log(`📝 Answer (${questionLanguage}): ${answerInUserLanguage}`);
+    } else {
+      console.log(`✅ Answer is already in English, no translation needed`);
     }
 
     // Store answer in session
@@ -343,6 +347,7 @@ async function getAnswer(callSid, req) {
     }
 
     // Convert translated answer to speech in user's language
+    console.log(`🎤 Converting to speech: Language="${detectedLanguageCode}"`);
     const audioFileName = await textToSpeechConvert(
       answerInUserLanguage,
       callSid,
@@ -352,10 +357,12 @@ async function getAnswer(callSid, req) {
     if (audioFileName) {
       // Play the generated audio in user's language
       const audioUrl = `${process.env.BASE_URL}/audio/${audioFileName}`;
+      console.log(`▶️ Playing audio in ${detectedLanguageCode}: ${audioUrl}`);
       twiml.play(audioUrl);
     } else {
       // Fallback to Twilio's TTS
-      twiml.say(answer, { voice: 'Polly.Joanna', language: 'en-US' });
+      console.log(`⚠️ Using Twilio TTS fallback in English`);
+      twiml.say(answerEnglish, { voice: 'Polly.Joanna', language: 'en-US' });
     }
 
     // Offer next options
