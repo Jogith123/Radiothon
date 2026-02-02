@@ -81,9 +81,29 @@ async function getUserStats(userPhone) {
   }
 }
 
+/**
+ * Get all history with optional filtering and pagination
+ * @param {Object} options - Query options
+ * @param {string} options.phoneNumber - Filter by phone number (optional)
+ * @param {string} options.subject - Filter by subject (optional)
+ * @param {number} options.limit - Maximum records to return
+ * @param {number} options.skip - Number of records to skip
+ * @returns {Promise<Array>} Array of history documents
+ */
+async function getAllHistory(options = {}) {
+  try {
+    const { phoneNumber, subject, limit = 50, skip = 0 } = options;
+    return await History.getAllWithFilters({ phoneNumber, subject, limit, skip });
+  } catch (error) {
+    console.error('❌ Error fetching all history:', error.message);
+    return [];
+  }
+}
+
 module.exports = {
   storeQuestionAndAnswer,
   getHistoryBySubject,
   getRecentHistory,
-  getUserStats
+  getUserStats,
+  getAllHistory
 };

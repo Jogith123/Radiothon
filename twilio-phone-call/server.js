@@ -8,8 +8,9 @@ const path = require('path');
 const { connectToMongoDB, closeConnection, isConnected } = require('./database/connection');
 const { initializeGemini, isInitialized: isGeminiInitialized, generateAnswer, generateSummary } = require('./services/geminiService');
 const { initializeTTS, initializeSTT, textToSpeechConvert, transcribeAudio } = require('./services/speechService');
-const { storeQuestionAndAnswer, getHistoryBySubject, getUserStats } = require('./services/historyService');
+const { storeQuestionAndAnswer, getHistoryBySubject, getUserStats, getAllHistory } = require('./services/historyService');
 const { initializeTranslation, detectLanguage, translateText, isTranslationAvailable } = require('./services/translationService');
+const { initializeWebSocket, broadcastCallStarted, broadcastQuestionTranscribed, broadcastAnswerGenerated, broadcastQASaved, broadcastCallEnded, broadcastPipelineStage, closeWebSocket } = require('./services/websocketService');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,6 +19,17 @@ const PORT = process.env.PORT || 3000;
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 app.use('/audio', express.static(path.join(__dirname, 'audio')));
+
+// CORS for frontend (allow all origins in development)
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
 
 // Initialize all services
 async function initializeServices() {
@@ -38,6 +50,9 @@ async function initializeServices() {
   // Initialize MongoDB
   await connectToMongoDB();
 
+  // Initialize WebSocket server (port 5050)
+  initializeWebSocket(5050);
+
   console.log('\n✅ All services initialized\n');
 }
 
@@ -50,13 +65,21 @@ app.post('/ivr/welcome', (req, res) => {
   const fromNumber = req.body.From;
   console.log(`📞 Incoming call: ${callSid} from ${fromNumber}`);
 
+  // Broadcast call started (non-blocking)
+  try {
+    broadcastCallStarted(callSid, fromNumber);
+  } catch (error) {
+    // Silent fail - don't affect phone call
+  }
+
   // Initialize session
   userSessions.set(callSid, {
     questions: [],
     currentQuestion: null,
     state: 'welcome',
     fromNumber: fromNumber,
-    language: 'en-US'  // Default to English, auto-detected from speech
+    language: 'en-US',  // Default to English, auto-detected from speech
+    startTime: Date.now() // Track call start time for duration
   });
 
   const twiml = new VoiceResponse();
@@ -240,6 +263,13 @@ async function processTranscription(recordingUrl, callSid) {
     userSessions.set(callSid, session);
 
     console.log(`✅ Question saved: "${questionForAI}" (from ${langCode})`);
+
+    // Broadcast question transcribed (non-blocking)
+    try {
+      broadcastQuestionTranscribed(callSid, questionForAI, detectedLanguage);
+    } catch (error) {
+      // Silent fail
+    }
   } catch (error) {
     console.error(`❌ Transcription error for ${callSid}:`, error.message);
     // Set a fallback message
@@ -320,6 +350,13 @@ async function getAnswer(callSid, req) {
 
     console.log(`🤖 Answer (English): ${answerEnglish}`);
 
+    // Broadcast answer generated (non-blocking)
+    try {
+      broadcastAnswerGenerated(callSid, answerEnglish, 'General'); // Subject will be classified later
+    } catch (error) {
+      // Silent fail
+    }
+
     // Get user's language from session
     const questionLanguage = session.questionLanguage || 'en';
     const detectedLanguageCode = session.detectedLanguageCode || 'en-US';
@@ -344,6 +381,20 @@ async function getAnswer(callSid, req) {
     // Classify and store (using English question and answer)
     if (isConnected()) {
       await storeQuestionAndAnswer(session.fromNumber, question, answerEnglish);
+
+      // Broadcast Q&A saved (non-blocking)
+      try {
+        broadcastQASaved({
+          callSid,
+          fromNumber: session.fromNumber,
+          question,
+          answer: answerEnglish.substring(0, 200),
+          language: detectedLanguageCode,
+          subject: 'Unknown' // Will be classified in storeQuestionAndAnswer
+        });
+      } catch (error) {
+        // Silent fail
+      }
     }
 
     // Convert translated answer to speech in user's language
@@ -630,6 +681,15 @@ function endCall(callSid, req) {
   );
   twiml.hangup();
 
+  // Broadcast call ended (non-blocking)
+  try {
+    const session = userSessions.get(callSid) || {};
+    const duration = session.startTime ? Math.floor((Date.now() - session.startTime) / 1000) : 0;
+    broadcastCallEnded(callSid, duration);
+  } catch (error) {
+    // Silent fail
+  }
+
   // Clean up session
   userSessions.delete(callSid);
 
@@ -646,6 +706,143 @@ function redirectWelcome() {
   twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
   return twiml.toString();
 }
+
+// ========================================
+// REST API Endpoints for Frontend
+// ========================================
+
+/**
+ * GET /api/history - Get all call history with optional filters
+ * Query params: phoneNumber, subject, limit, skip
+ */
+app.get('/api/history', async (req, res) => {
+  try {
+    const { phoneNumber, subject, limit, skip } = req.query;
+    const options = {
+      phoneNumber,
+      subject,
+      limit: limit ? parseInt(limit) : 50,
+      skip: skip ? parseInt(skip) : 0
+    };
+
+    const history = await getAllHistory(options);
+
+    res.json({
+      success: true,
+      count: history.length,
+      data: history
+    });
+  } catch (error) {
+    console.error('Error fetching history:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch history'
+    });
+  }
+});
+
+/**
+ * GET /api/history/:phoneNumber - Get history for specific user
+ */
+app.get('/api/history/:phoneNumber', async (req, res) => {
+  try {
+    const { phoneNumber } = req.params;
+    const { limit } = req.query;
+
+    const history = await getAllHistory({
+      phoneNumber,
+      limit: limit ? parseInt(limit) : 50
+    });
+
+    res.json({
+      success: true,
+      phoneNumber,
+      count: history.length,
+      data: history
+    });
+  } catch (error) {
+    console.error('Error fetching user history:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch user history'
+    });
+  }
+});
+
+/**
+ * GET /api/stats - Get aggregate statistics
+ * Query params: phoneNumber (optional)
+ */
+app.get('/api/stats', async (req, res) => {
+  try {
+    const { phoneNumber } = req.query;
+
+    if (phoneNumber) {
+      // Get stats for specific user
+      const stats = await getUserStats(phoneNumber);
+      res.json({
+        success: true,
+        phoneNumber,
+        ...stats
+      });
+    } else {
+      // Get overall stats (all users)
+      const allHistory = await getAllHistory({ limit: 1000 });
+      const totalCalls = allHistory.length;
+      const uniqueUsers = [...new Set(allHistory.map(h => h.user_id))].length;
+      const subjectCounts = {};
+
+      allHistory.forEach(h => {
+        subjectCounts[h.subject] = (subjectCounts[h.subject] || 0) + 1;
+      });
+
+      res.json({
+        success: true,
+        totalCalls,
+        uniqueUsers,
+        subjectCounts
+      });
+    }
+  } catch (error) {
+    console.error('Error fetching stats:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch stats'
+    });
+  }
+});
+
+/**
+ * GET /api/calls/active - Get active call sessions
+ */
+app.get('/api/calls/active', (req, res) => {
+  try {
+    const activeCalls = [];
+
+    userSessions.forEach((session, callSid) => {
+      activeCalls.push({
+        callSid,
+        fromNumber: session.fromNumber,
+        state: session.state,
+        language: session.detectedLanguageCode || session.language,
+        currentQuestion: session.currentQuestion,
+        questionCount: session.questions?.length || 0
+      });
+    });
+
+    res.json({
+      success: true,
+      count: activeCalls.length,
+      data: activeCalls
+    });
+  } catch (error) {
+    console.error('Error fetching active calls:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch active calls'
+    });
+  }
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -671,6 +868,7 @@ app.use((err, req, res, next) => {
 // Graceful shutdown
 process.on('SIGINT', async () => {
   console.log('\n🛑 Shutting down gracefully...');
+  closeWebSocket();
   await closeConnection();
   process.exit(0);
 });

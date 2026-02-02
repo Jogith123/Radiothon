@@ -194,6 +194,41 @@ class History {
     return await collection.insertOne(document);
   }
 
+  /**
+   * Get all history with optional filters and pagination
+   * @param {Object} filters - Query filters
+   * @param {string} filters.phoneNumber - Filter by phone number (optional)
+   * @param {string} filters.subject - Filter by subject (optional)
+   * @param {number} filters.limit - Maximum records to return (default: 50)
+   * @param {number} filters.skip - Number of records to skip (default: 0)
+   * @returns {Promise<Array>} Array of history documents
+   */
+  static async getAllWithFilters(filters = {}) {
+    const collection = this.getCollection();
+    if (!collection) {
+      return [];
+    }
+
+    const { phoneNumber, subject, limit = 50, skip = 0 } = filters;
+    const query = {};
+
+    if (phoneNumber) {
+      query.user_id = phoneNumber;
+    }
+
+    if (subject) {
+      const escapedSubject = subject.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      query.subject = { $regex: new RegExp(escapedSubject, 'i') };
+    }
+
+    return await collection
+      .find(query)
+      .sort({ timestamp: -1 })
+      .skip(skip)
+      .limit(limit)
+      .toArray();
+  }
+
 }
 
 module.exports = History;
