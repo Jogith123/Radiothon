@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { LayoutDashboard, Phone, BarChart3, BookOpen, Zap } from 'lucide-react';
+import { LayoutDashboard, Phone, BarChart3, BookOpen, Zap, History } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { buttonHover, buttonTap, transitions } from '../../lib/motion';
@@ -12,6 +12,7 @@ import { buttonHover, buttonTap, transitions } from '../../lib/motion';
 const menuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
     { icon: Phone, label: 'Live Calls', path: '/calls', badge: 'LIVE' },
+    { icon: History, label: 'Call History', path: '/history' },
     { icon: BarChart3, label: 'Analytics', path: '/analytics' },
     { icon: BookOpen, label: 'Content Library', path: '/content' },
 ];
