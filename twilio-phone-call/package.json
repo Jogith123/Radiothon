@@ -1,21 +1,20 @@
 {
-  "name": "twilio-phone-call",
+  "name": "exotel-phone-system",
   "version": "1.0.0",
-  "description": "Make phone calls using Twilio API",
-  "main": "makeCall.js",
+  "description": "Production-ready phone system using Exotel API",
+  "main": "server.js",
   "scripts": {
-    "start": "node makeCall.js",
-    "server": "node server.js",
-    "dev": "set PORT=3001&& nodemon server.js",
-    "tunnel": "lt --port 3000",
-    "update-url": "node update-url.js",
+    "start": "node server.js",
+    "dev": "set PORT=3000&& nodemon server.js",
     "test-mongodb": "node test-mongodb.js",
     "test-classification": "node test-classification.js"
   },
   "keywords": [
-    "twilio",
+    "exotel",
     "phone",
-    "call"
+    "ivr",
+    "ai",
+    "education"
   ],
   "author": "",
   "license": "ISC",
@@ -27,9 +26,10 @@
     "axios": "^1.6.0",
     "body-parser": "^1.20.2",
     "dotenv": "^16.4.5",
+    "exotel": "^1.0.0",
     "express": "^4.18.2",
     "mongodb": "^6.20.0",
-    "twilio": "^5.3.4"
+    "redis": "^4.7.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
