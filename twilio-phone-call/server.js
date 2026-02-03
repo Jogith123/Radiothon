@@ -856,7 +856,104 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Error handler for all routes
+// ========================================
+// Exotel Integration
+// ========================================
+
+/**
+ * GET /exotel/test - Test endpoint to verify server is reachable
+ */
+app.get('/exotel/test', (req, res) => {
+  console.log('✅ Test endpoint hit - Server is reachable!');
+  res.send('Exotel webhook endpoint is working! Server time: ' + new Date().toISOString());
+});
+
+/**
+ * GET/POST /exotel/incoming - Exotel missed call webhook
+ * Triggers Twilio outbound call to the caller's number
+ * Accepts both GET and POST methods (Exotel may use either)
+ */
+const handleExotelWebhook = async (req, res) => {
+  console.log('\n========================================');
+  console.log('🔔 EXOTEL WEBHOOK RECEIVED');
+  console.log(`📡 Method: ${req.method}`);
+  console.log('========================================');
+
+  // Exotel may send data via query params (GET) or body (POST)
+  const params = req.method === 'GET' ? req.query : req.body;
+  console.log('📦 Full params:', JSON.stringify(params, null, 2));
+
+  const fromNumber = params.From || params.from || params.CallFrom;
+  console.log(`📞 Caller Number (From): ${fromNumber}`);
+
+  if (!fromNumber) {
+    console.error('❌ ERROR: Missing From parameter in Exotel webhook');
+    console.error('📦 Available parameters:', Object.keys(params));
+    return res.status(400).send('Missing From parameter');
+  }
+
+  // Normalize phone number to E.164 format for Twilio
+  // Remove leading 0 and add +91 country code for Indian numbers
+  let normalizedNumber = fromNumber;
+  if (fromNumber.startsWith('0')) {
+    normalizedNumber = '+91' + fromNumber.substring(1);
+    console.log(`📱 Normalized number: ${fromNumber} → ${normalizedNumber}`);
+  } else if (!fromNumber.startsWith('+')) {
+    normalizedNumber = '+91' + fromNumber;
+    console.log(`📱 Added country code: ${fromNumber} → ${normalizedNumber}`);
+  }
+
+  // Initialize Twilio client
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER || '+18588082832';
+
+  console.log('\n🔧 Twilio Configuration:');
+  console.log(`   From Number: ${twilioPhoneNumber}`);
+  console.log(`   To Number: ${normalizedNumber}`);
+  console.log(`   Webhook URL: ${process.env.BASE_URL}/ivr/welcome`);
+  console.log(`   Account SID: ${accountSid ? accountSid.substring(0, 10) + '...' : 'MISSING'}`);
+
+  const twilio = require('twilio');
+  const client = twilio(accountSid, authToken);
+
+  try {
+    console.log('\n⏳ Initiating Twilio outbound call...');
+
+    // Trigger Twilio outbound call
+    const call = await client.calls.create({
+      from: twilioPhoneNumber,
+      to: normalizedNumber,  // Normalized E.164 format number
+      url: `${process.env.BASE_URL}/ivr/welcome`
+    });
+
+    console.log('\n✅ SUCCESS: Twilio call initiated!');
+    console.log(`   Call SID: ${call.sid}`);
+    console.log(`   Status: ${call.status}`);
+    console.log(`   From: ${call.from}`);
+    console.log(`   To: ${call.to}`);
+    console.log(`   Direction: ${call.direction}`);
+    console.log('========================================\n');
+
+    res.status(200).send('OK');
+  } catch (error) {
+    console.error('\n❌ FAILED: Error creating Twilio call');
+    console.error(`   Error Message: ${error.message}`);
+    console.error(`   Error Code: ${error.code || 'N/A'}`);
+    console.error(`   Error Details: ${JSON.stringify(error, null, 2)}`);
+    console.log('========================================\n');
+
+    res.status(500).send('Error initiating call');
+  }
+};
+
+// Register both GET and POST routes
+app.get('/exotel/incoming', handleExotelWebhook);
+app.post('/exotel/incoming', handleExotelWebhook);
+
+// ========================================
+// Error Handler
+// ========================================
 app.use((err, req, res, next) => {
   console.error('❌ Server Error:', err);
   const twiml = new VoiceResponse();
