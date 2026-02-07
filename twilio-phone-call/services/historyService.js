@@ -4,7 +4,7 @@
  */
 
 const History = require('../models/History');
-const { classifySubject } = require('./geminiService');
+const { classifySubject } = require('./openaiService');
 
 /**
  * Store a question and answer with automatic subject classification
@@ -19,9 +19,16 @@ async function storeQuestionAndAnswer(userPhone, question, answer) {
     // Classify the subject
     const subject = await classifySubject(question);
 
+    // Check if user has 15+ questions, delete oldest if so
+    const count = await History.getQuestionCount(userPhone);
+    if (count >= 15) {
+      console.log(`📊 User has ${count} questions, deleting oldest...`);
+      await History.deleteOldestQuestion(userPhone);
+    }
+
     // Insert: Create a new document for this Q&A
     await History.insertQuestion(userPhone, subject, question, answer);
-    console.log(`✅ Stored Q&A in MongoDB - Subject: ${subject} - User: ${userPhone}`);
+    console.log(`✅ Stored Q&A in MongoDB - Subject: ${subject} - User: ${userPhone} (Total: ${Math.min(count + 1, 15)})`);
   } catch (error) {
     console.error('❌ Error storing to MongoDB:', error.message);
   }

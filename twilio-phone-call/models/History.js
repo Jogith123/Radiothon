@@ -125,6 +125,33 @@ class History {
   }
 
   /**
+   * Delete the oldest question for a user (to maintain limit)
+   * @param {string} userId - User's phone number
+   * @returns {Promise<Object>} Delete result
+   */
+  static async deleteOldestQuestion(userId) {
+    const collection = this.getCollection();
+    if (!collection) {
+      throw new Error('Database not connected');
+    }
+
+    // Find oldest question
+    const oldest = await collection
+      .find({ user_id: userId })
+      .sort({ timestamp: 1 })
+      .limit(1)
+      .toArray();
+
+    if (oldest.length > 0) {
+      const result = await collection.deleteOne({ _id: oldest[0]._id });
+      console.log(`🗑️  Deleted oldest question for ${userId}: "${oldest[0].question.substring(0, 50)}..."`);
+      return result;
+    }
+
+    return { deletedCount: 0 };
+  }
+
+  /**
    * Delete all records for a user (for testing/cleanup)
    * @param {string} userId - User's phone number
    * @returns {Promise<Object>} Delete result

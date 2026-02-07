@@ -6,7 +6,7 @@ const path = require('path');
 
 // Import modular services
 const { connectToMongoDB, closeConnection, isConnected } = require('./database/connection');
-const { initializeGemini, isInitialized: isGeminiInitialized, generateAnswer, generateSummary } = require('./services/geminiService');
+const { initializeOpenAI, isInitialized: isOpenAIInitialized, generateAnswer, generateSummary } = require('./services/openaiService');
 const { initializeTTS, initializeSTT, textToSpeechConvert, transcribeAudio } = require('./services/speechService');
 const { storeQuestionAndAnswer, getHistoryBySubject, getUserStats, getAllHistory } = require('./services/historyService');
 const { initializeTranslation, detectLanguage, translateText, isTranslationAvailable } = require('./services/translationService');
@@ -35,8 +35,8 @@ app.use((req, res, next) => {
 async function initializeServices() {
   console.log('🚀 Initializing Vidya Vani services...\n');
 
-  // Initialize Gemini AI
-  initializeGemini();
+  // Initialize OpenAI
+  initializeOpenAI();
 
   // Initialize Google TTS
   initializeTTS();
@@ -97,6 +97,7 @@ app.post('/ivr/welcome', (req, res) => {
     'Press 3 to get the answer. ' +
     'Press 4 to get a summary of your last 5 questions on a subject. ' +
     'Press 5 to stop and return to main menu. ' +
+    'Press 6 to add more details to your last question. ' +
     'Press 9 to end the call.',
     { voice: 'Polly.Joanna', language: 'en-US', loop: 2 }
   );
@@ -117,6 +118,7 @@ app.post('/ivr/menu', async (req, res) => {
     '3': getAnswer,
     '4': getSummary,
     '5': returnToMenu,
+    '6': followUpQuestion,
     '9': endCall
   };
 
@@ -279,6 +281,62 @@ async function processTranscription(recordingUrl, callSid) {
   }
 }
 
+// Process follow-up transcription and combine with original question
+async function processFollowupTranscription(recordingUrl, callSid) {
+  try {
+    const session = userSessions.get(callSid) || {};
+    const userLanguage = session.language || 'en-US';
+
+    // Transcribe the additional details
+    const transcriptionResult = await transcribeAudio(recordingUrl, callSid, userLanguage);
+    const additionalDetails = transcriptionResult.text || transcriptionResult;
+    const detectedLanguage = transcriptionResult.detectedLanguage || userLanguage;
+
+    console.log(`📝 Additional details transcribed: "${additionalDetails}"`);
+
+    // Get language code
+    const langCode = detectedLanguage.split('-')[0];
+
+    // Translate to English if needed
+    let additionalDetailsEnglish = additionalDetails;
+    if (langCode !== 'en') {
+      console.log(`🌐 Translating ${langCode} → English...`);
+      additionalDetailsEnglish = await translateText(additionalDetails, 'en', langCode);
+      console.log(`📝 Translated details: "${additionalDetailsEnglish}"`);
+    }
+
+    // Combine with original question
+    const originalQuestion = session.originalQuestionBeforeFollowup || session.currentQuestion;
+    const combinedQuestion = `${originalQuestion}. Additional details: ${additionalDetailsEnglish}`;
+
+    console.log(`🔗 Combined question: "${combinedQuestion}"`);
+
+    // Update session with combined question
+    session.currentQuestion = combinedQuestion;
+    session.originalQuestion = combinedQuestion;
+    session.followUpDetails = additionalDetailsEnglish;
+    session.questionLanguage = langCode;
+    session.detectedLanguageCode = detectedLanguage;
+    session.state = 'followup_complete';
+    userSessions.set(callSid, session);
+
+    console.log(`✅ Follow-up processed and combined`);
+
+    // Broadcast follow-up transcribed (non-blocking)
+    try {
+      broadcastQuestionTranscribed(callSid, combinedQuestion, detectedLanguage);
+    } catch (error) {
+      // Silent fail
+    }
+
+  } catch (error) {
+    console.error(`❌ Follow-up transcription error for ${callSid}:`, error.message);
+    const session = userSessions.get(callSid) || {};
+    session.transcriptionError = true;
+    userSessions.set(callSid, session);
+  }
+}
+
 // Handle transcription callback (kept for backward compatibility with Twilio transcription)
 app.post('/ivr/transcription', async (req, res) => {
   const callSid = req.body.CallSid;
@@ -329,23 +387,28 @@ async function getAnswer(callSid, req) {
   }
 
   try {
-    // Check if Gemini AI is available
-    if (!isGeminiInitialized()) {
+    // Check if OpenAI is available
+    if (!isOpenAIInitialized()) {
       twiml.say(
-        'Sorry, AI service is not configured. Please add your Gemini API key to the environment file.',
+        'Sorry, AI service is not configured. Please add your OpenAI API key to the environment file.',
         { voice: 'Polly.Joanna', language: 'en-US' }
       );
       twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
       return twiml.toString();
     }
 
-    // Get answer from Gemini AI (in English)
+    // Get answer from OpenAI (in English)
+    let answer = '';
+
+    // Get the question from session
+    // const question = session.currentQuestion; // This line is already present above, no need to duplicate.
+
     twiml.say(
       'Processing your question with AI. Please wait.',
       { voice: 'Polly.Joanna', language: 'en-US' }
     );
 
-    console.log(`🤖 Sending to Gemini: ${question}`);
+    console.log(`🤖 Sending to OpenAI: ${question}`);
     const answerEnglish = await generateAnswer(question);
 
     console.log(`🤖 Answer (English): ${answerEnglish}`);
@@ -430,7 +493,7 @@ async function getAnswer(callSid, req) {
     );
 
   } catch (error) {
-    console.error('Error getting answer from Gemini:', error);
+    console.error('Error getting answer from OpenAI:', error);
     twiml.say(
       'Sorry, I encountered an error processing your question. Please try again.',
       { voice: 'Polly.Joanna', language: 'en-US' }
@@ -460,10 +523,10 @@ async function getSummary(callSid, req) {
       return twiml.toString();
     }
 
-    // Check if Gemini AI is available
-    if (!isGeminiInitialized()) {
+    // Check if OpenAI is available
+    if (!isOpenAIInitialized()) {
       twiml.say(
-        'Sorry, AI service is not configured. Please add your Gemini API key to the environment file.',
+        'Sorry, AI service is not configured. Please add your OpenAI API key to the environment file.',
         { voice: 'Polly.Joanna', language: 'en-US' }
       );
       twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
@@ -498,6 +561,47 @@ async function getSummary(callSid, req) {
   return twiml.toString();
 }
 
+// Follow-up question flow - add more details to last question
+async function followUpQuestion(callSid, req) {
+  console.log(`🔄 Follow-up question for call: ${callSid}`);
+  const session = userSessions.get(callSid) || {};
+
+  const twiml = new VoiceResponse();
+
+  // Check if there's a previous question
+  if (!session.currentQuestion) {
+    console.log(`⚠️  No previous question found for call: ${callSid}`);
+    twiml.say(
+      'No previous question found. Please press 1 to ask a question first.',
+      { voice: 'Polly.Joanna', language: 'en-US' }
+    );
+    twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
+    return twiml.toString();
+  }
+
+  console.log(`📝 Previous question: "${session.currentQuestion}"`);
+
+  // Store the original question before follow-up
+  session.originalQuestionBeforeFollowup = session.currentQuestion;
+  userSessions.set(callSid, session);
+
+  twiml.say(
+    'You can add more details to the last question. Please speak now and press 2 when finished.',
+    { voice: 'Polly.Joanna', language: 'en-US' }
+  );
+
+  twiml.record({
+    action: `${process.env.BASE_URL}/ivr/followup-recorded`,
+    method: 'POST',
+    maxLength: 60,
+    finishOnKey: '2',
+    transcribe: false,
+    playBeep: true
+  });
+
+  return twiml.toString();
+}
+
 // Process summary request
 app.post('/ivr/process-summary', async (req, res) => {
   const callSid = req.body.CallSid;
@@ -515,7 +619,14 @@ app.post('/ivr/process-summary', async (req, res) => {
 
     if (recordingUrl) {
       try {
-        const transcribedText = await transcribeAudio(recordingUrl, callSid);
+        // Transcribe with explicit language
+        const transcriptionResult = await transcribeAudio(recordingUrl, callSid, 'en-US');
+
+        // Handle both string and object responses
+        const transcribedText = typeof transcriptionResult === 'string'
+          ? transcriptionResult
+          : (transcriptionResult.text || transcriptionResult.transcript || '');
+
         console.log(`📝 Subject name transcribed: "${transcribedText}"`);
 
         // Extract just the subject name (remove phrases like "give me summary", "I want summary", etc.)
@@ -550,7 +661,7 @@ app.post('/ivr/process-summary', async (req, res) => {
       return;
     }
 
-    // Generate summary using Gemini
+    // Generate summary using OpenAI
     console.log(`🤖 Generating summary for ${subjectName} with ${history.length} questions...`);
     const summary = await generateSummary(subjectName, history);
     console.log(`📊 Summary generated successfully`);
@@ -663,6 +774,46 @@ function extractSubjectName(text) {
   console.log(`📚 Using capitalized: "${capitalized}"`);
   return capitalized;
 }
+
+// Handle recorded follow-up details
+app.post('/ivr/followup-recorded', async (req, res) => {
+  const callSid = req.body.CallSid;
+  const recordingUrl = req.body.RecordingUrl;
+  console.log(`✅ Follow-up recording completed for call: ${callSid}`);
+  console.log(`📼 Recording URL: ${recordingUrl}`);
+
+  const session = userSessions.get(callSid) || {};
+  session.lastFollowupRecordingUrl = recordingUrl;
+  session.state = 'processing_followup';
+  userSessions.set(callSid, session);
+
+  // Process follow-up transcription
+  processFollowupTranscription(recordingUrl, callSid).catch(err => {
+    console.error(`❌ Follow-up transcription error for ${callSid}:`, err);
+  });
+
+  const twiml = new VoiceResponse();
+  twiml.say(
+    'Thank you. Your additional details are being processed. ' +
+    'Please press 3 to hear the updated answer.',
+    { voice: 'Polly.Joanna', language: 'en-US' }
+  );
+
+  const gather = twiml.gather({
+    action: `${process.env.BASE_URL}/ivr/menu`,
+    numDigits: '1',
+    method: 'POST',
+    timeout: 10
+  });
+
+  gather.say(
+    'Press 3 for answer, or press 1 for new question.',
+    { voice: 'Polly.Joanna', language: 'en-US', loop: 3 }
+  );
+
+  res.type('text/xml');
+  res.send(twiml.toString());
+});
 
 // Return to main menu
 function returnToMenu(callSid, req) {
@@ -850,7 +1001,7 @@ app.get('/health', (req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     services: {
-      gemini: isGeminiInitialized(),
+      openai: isOpenAIInitialized(),
       mongodb: isConnected()
     }
   });
