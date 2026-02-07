@@ -13,6 +13,7 @@ import DashboardLayout from './components/layout/DashboardLayout';
 import Dashboard from './pages/Dashboard';
 import LiveCalls from './pages/LiveCalls';
 import Analytics from './pages/Analytics';
+import CallHistory from './pages/CallHistory';
 import PlaceholderPage from './pages/PlaceholderPage';
 
 // Context Providers
@@ -40,6 +41,7 @@ const AnimatedRoutes = () => {
         <Route path="/" element={<Dashboard />} />
         <Route path="/calls" element={<LiveCalls />} />
         <Route path="/analytics" element={<Analytics />} />
+        <Route path="/history" element={<CallHistory />} />
         <Route path="/content" element={<PlaceholderPage title="Content Library" />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
