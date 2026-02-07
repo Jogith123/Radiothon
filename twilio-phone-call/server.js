@@ -6,10 +6,11 @@ const path = require('path');
 
 // Import modular services
 const { connectToMongoDB, closeConnection, isConnected } = require('./database/connection');
-const { initializeGemini, isInitialized: isGeminiInitialized, generateAnswer, generateSummary } = require('./services/geminiService');
+const { initializeOpenAI, isInitialized: isOpenAIInitialized, generateAnswer, generateSummary } = require('./services/openaiService');
 const { initializeTTS, initializeSTT, textToSpeechConvert, transcribeAudio } = require('./services/speechService');
-const { storeQuestionAndAnswer, getHistoryBySubject, getUserStats } = require('./services/historyService');
+const { storeQuestionAndAnswer, getHistoryBySubject, getUserStats, getAllHistory } = require('./services/historyService');
 const { initializeTranslation, detectLanguage, translateText, isTranslationAvailable } = require('./services/translationService');
+const { initializeWebSocket, broadcastCallStarted, broadcastQuestionTranscribed, broadcastAnswerGenerated, broadcastQASaved, broadcastCallEnded, broadcastPipelineStage, closeWebSocket } = require('./services/websocketService');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -19,12 +20,23 @@ app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 app.use('/audio', express.static(path.join(__dirname, 'audio')));
 
+// CORS for frontend (allow all origins in development)
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 // Initialize all services
 async function initializeServices() {
   console.log('🚀 Initializing Vidya Vani services...\n');
 
-  // Initialize Gemini AI
-  initializeGemini();
+  // Initialize OpenAI
+  initializeOpenAI();
 
   // Initialize Google TTS
   initializeTTS();
@@ -38,6 +50,9 @@ async function initializeServices() {
   // Initialize MongoDB
   await connectToMongoDB();
 
+  // Initialize WebSocket server (port 5050)
+  initializeWebSocket(5050);
+
   console.log('\n✅ All services initialized\n');
 }
 
@@ -50,13 +65,21 @@ app.post('/ivr/welcome', (req, res) => {
   const fromNumber = req.body.From;
   console.log(`📞 Incoming call: ${callSid} from ${fromNumber}`);
 
+  // Broadcast call started (non-blocking)
+  try {
+    broadcastCallStarted(callSid, fromNumber);
+  } catch (error) {
+    // Silent fail - don't affect phone call
+  }
+
   // Initialize session
   userSessions.set(callSid, {
     questions: [],
     currentQuestion: null,
     state: 'welcome',
     fromNumber: fromNumber,
-    language: 'en-US'  // Default to English, auto-detected from speech
+    language: 'en-US',  // Default to English, auto-detected from speech
+    startTime: Date.now() // Track call start time for duration
   });
 
   const twiml = new VoiceResponse();
@@ -74,6 +97,7 @@ app.post('/ivr/welcome', (req, res) => {
     'Press 3 to get the answer. ' +
     'Press 4 to get a summary of your last 5 questions on a subject. ' +
     'Press 5 to stop and return to main menu. ' +
+    'Press 6 to add more details to your last question. ' +
     'Press 9 to end the call.',
     { voice: 'Polly.Joanna', language: 'en-US', loop: 2 }
   );
@@ -94,6 +118,7 @@ app.post('/ivr/menu', async (req, res) => {
     '3': getAnswer,
     '4': getSummary,
     '5': returnToMenu,
+    '6': followUpQuestion,
     '9': endCall
   };
 
@@ -240,9 +265,72 @@ async function processTranscription(recordingUrl, callSid) {
     userSessions.set(callSid, session);
 
     console.log(`✅ Question saved: "${questionForAI}" (from ${langCode})`);
+
+    // Broadcast question transcribed (non-blocking)
+    try {
+      broadcastQuestionTranscribed(callSid, questionForAI, detectedLanguage);
+    } catch (error) {
+      // Silent fail
+    }
   } catch (error) {
     console.error(`❌ Transcription error for ${callSid}:`, error.message);
     // Set a fallback message
+    const session = userSessions.get(callSid) || {};
+    session.transcriptionError = true;
+    userSessions.set(callSid, session);
+  }
+}
+
+// Process follow-up transcription and combine with original question
+async function processFollowupTranscription(recordingUrl, callSid) {
+  try {
+    const session = userSessions.get(callSid) || {};
+    const userLanguage = session.language || 'en-US';
+
+    // Transcribe the additional details
+    const transcriptionResult = await transcribeAudio(recordingUrl, callSid, userLanguage);
+    const additionalDetails = transcriptionResult.text || transcriptionResult;
+    const detectedLanguage = transcriptionResult.detectedLanguage || userLanguage;
+
+    console.log(`📝 Additional details transcribed: "${additionalDetails}"`);
+
+    // Get language code
+    const langCode = detectedLanguage.split('-')[0];
+
+    // Translate to English if needed
+    let additionalDetailsEnglish = additionalDetails;
+    if (langCode !== 'en') {
+      console.log(`🌐 Translating ${langCode} → English...`);
+      additionalDetailsEnglish = await translateText(additionalDetails, 'en', langCode);
+      console.log(`📝 Translated details: "${additionalDetailsEnglish}"`);
+    }
+
+    // Combine with original question
+    const originalQuestion = session.originalQuestionBeforeFollowup || session.currentQuestion;
+    const combinedQuestion = `${originalQuestion}. Additional details: ${additionalDetailsEnglish}`;
+
+    console.log(`🔗 Combined question: "${combinedQuestion}"`);
+
+    // Update session with combined question
+    session.currentQuestion = combinedQuestion;
+    session.originalQuestion = combinedQuestion;
+    session.followUpDetails = additionalDetailsEnglish;
+    session.questionLanguage = langCode;
+    session.detectedLanguageCode = detectedLanguage;
+    session.state = 'followup_complete';
+    userSessions.set(callSid, session);
+
+    console.log(`✅ Follow-up processed and combined`);
+
+    // Broadcast follow-up transcribed (non-blocking)
+    try {
+      broadcastQuestionTranscribed(callSid, combinedQuestion, detectedLanguage);
+    } catch (error) {
+      // Silent fail
+    }
+
+  } catch (error) {
+    console.error(`❌ Follow-up transcription error for ${callSid}:`, error.message);
     const session = userSessions.get(callSid) || {};
     session.transcriptionError = true;
     userSessions.set(callSid, session);
@@ -299,26 +387,38 @@ async function getAnswer(callSid, req) {
   }
 
   try {
-    // Check if Gemini AI is available
-    if (!isGeminiInitialized()) {
+    // Check if OpenAI is available
+    if (!isOpenAIInitialized()) {
       twiml.say(
-        'Sorry, AI service is not configured. Please add your Gemini API key to the environment file.',
+        'Sorry, AI service is not configured. Please add your OpenAI API key to the environment file.',
         { voice: 'Polly.Joanna', language: 'en-US' }
       );
       twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
       return twiml.toString();
     }
 
-    // Get answer from Gemini AI (in English)
+    // Get answer from OpenAI (in English)
+    let answer = '';
+
+    // Get the question from session
+    // const question = session.currentQuestion; // This line is already present above, no need to duplicate.
+
     twiml.say(
       'Processing your question with AI. Please wait.',
       { voice: 'Polly.Joanna', language: 'en-US' }
     );
 
-    console.log(`🤖 Sending to Gemini: ${question}`);
+    console.log(`🤖 Sending to OpenAI: ${question}`);
     const answerEnglish = await generateAnswer(question);
 
     console.log(`🤖 Answer (English): ${answerEnglish}`);
+
+    // Broadcast answer generated (non-blocking)
+    try {
+      broadcastAnswerGenerated(callSid, answerEnglish, 'General'); // Subject will be classified later
+    } catch (error) {
+      // Silent fail
+    }
 
     // Get user's language from session
     const questionLanguage = session.questionLanguage || 'en';
@@ -344,6 +444,20 @@ async function getAnswer(callSid, req) {
     // Classify and store (using English question and answer)
     if (isConnected()) {
       await storeQuestionAndAnswer(session.fromNumber, question, answerEnglish);
+
+      // Broadcast Q&A saved (non-blocking)
+      try {
+        broadcastQASaved({
+          callSid,
+          fromNumber: session.fromNumber,
+          question,
+          answer: answerEnglish.substring(0, 200),
+          language: detectedLanguageCode,
+          subject: 'Unknown' // Will be classified in storeQuestionAndAnswer
+        });
+      } catch (error) {
+        // Silent fail
+      }
     }
 
     // Convert translated answer to speech in user's language
@@ -379,7 +493,7 @@ async function getAnswer(callSid, req) {
     );
 
   } catch (error) {
-    console.error('Error getting answer from Gemini:', error);
+    console.error('Error getting answer from OpenAI:', error);
     twiml.say(
       'Sorry, I encountered an error processing your question. Please try again.',
       { voice: 'Polly.Joanna', language: 'en-US' }
@@ -409,10 +523,10 @@ async function getSummary(callSid, req) {
       return twiml.toString();
     }
 
-    // Check if Gemini AI is available
-    if (!isGeminiInitialized()) {
+    // Check if OpenAI is available
+    if (!isOpenAIInitialized()) {
       twiml.say(
-        'Sorry, AI service is not configured. Please add your Gemini API key to the environment file.',
+        'Sorry, AI service is not configured. Please add your OpenAI API key to the environment file.',
         { voice: 'Polly.Joanna', language: 'en-US' }
       );
       twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
@@ -447,6 +561,47 @@ async function getSummary(callSid, req) {
   return twiml.toString();
 }
 
+// Follow-up question flow - add more details to last question
+async function followUpQuestion(callSid, req) {
+  console.log(`🔄 Follow-up question for call: ${callSid}`);
+  const session = userSessions.get(callSid) || {};
+
+  const twiml = new VoiceResponse();
+
+  // Check if there's a previous question
+  if (!session.currentQuestion) {
+    console.log(`⚠️  No previous question found for call: ${callSid}`);
+    twiml.say(
+      'No previous question found. Please press 1 to ask a question first.',
+      { voice: 'Polly.Joanna', language: 'en-US' }
+    );
+    twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
+    return twiml.toString();
+  }
+
+  console.log(`📝 Previous question: "${session.currentQuestion}"`);
+
+  // Store the original question before follow-up
+  session.originalQuestionBeforeFollowup = session.currentQuestion;
+  userSessions.set(callSid, session);
+
+  twiml.say(
+    'You can add more details to the last question. Please speak now and press 2 when finished.',
+    { voice: 'Polly.Joanna', language: 'en-US' }
+  );
+
+  twiml.record({
+    action: `${process.env.BASE_URL}/ivr/followup-recorded`,
+    method: 'POST',
+    maxLength: 60,
+    finishOnKey: '2',
+    transcribe: false,
+    playBeep: true
+  });
+
+  return twiml.toString();
+}
+
 // Process summary request
 app.post('/ivr/process-summary', async (req, res) => {
   const callSid = req.body.CallSid;
@@ -464,7 +619,14 @@ app.post('/ivr/process-summary', async (req, res) => {
 
     if (recordingUrl) {
       try {
-        const transcribedText = await transcribeAudio(recordingUrl, callSid);
+        // Transcribe with explicit language
+        const transcriptionResult = await transcribeAudio(recordingUrl, callSid, 'en-US');
+
+        // Handle both string and object responses
+        const transcribedText = typeof transcriptionResult === 'string'
+          ? transcriptionResult
+          : (transcriptionResult.text || transcriptionResult.transcript || '');
+
         console.log(`📝 Subject name transcribed: "${transcribedText}"`);
 
         // Extract just the subject name (remove phrases like "give me summary", "I want summary", etc.)
@@ -499,7 +661,7 @@ app.post('/ivr/process-summary', async (req, res) => {
       return;
     }
 
-    // Generate summary using Gemini
+    // Generate summary using OpenAI
     console.log(`🤖 Generating summary for ${subjectName} with ${history.length} questions...`);
     const summary = await generateSummary(subjectName, history);
     console.log(`📊 Summary generated successfully`);
@@ -613,6 +775,46 @@ function extractSubjectName(text) {
   return capitalized;
 }
 
+// Handle recorded follow-up details
+app.post('/ivr/followup-recorded', async (req, res) => {
+  const callSid = req.body.CallSid;
+  const recordingUrl = req.body.RecordingUrl;
+  console.log(`✅ Follow-up recording completed for call: ${callSid}`);
+  console.log(`📼 Recording URL: ${recordingUrl}`);
+
+  const session = userSessions.get(callSid) || {};
+  session.lastFollowupRecordingUrl = recordingUrl;
+  session.state = 'processing_followup';
+  userSessions.set(callSid, session);
+
+  // Process follow-up transcription
+  processFollowupTranscription(recordingUrl, callSid).catch(err => {
+    console.error(`❌ Follow-up transcription error for ${callSid}:`, err);
+  });
+
+  const twiml = new VoiceResponse();
+  twiml.say(
+    'Thank you. Your additional details are being processed. ' +
+    'Please press 3 to hear the updated answer.',
+    { voice: 'Polly.Joanna', language: 'en-US' }
+  );
+
+  const gather = twiml.gather({
+    action: `${process.env.BASE_URL}/ivr/menu`,
+    numDigits: '1',
+    method: 'POST',
+    timeout: 10
+  });
+
+  gather.say(
+    'Press 3 for answer, or press 1 for new question.',
+    { voice: 'Polly.Joanna', language: 'en-US', loop: 3 }
+  );
+
+  res.type('text/xml');
+  res.send(twiml.toString());
+});
+
 // Return to main menu
 function returnToMenu(callSid, req) {
   console.log(`🔄 Returning to main menu for call: ${callSid}`);
@@ -629,6 +831,15 @@ function endCall(callSid, req) {
     { voice: 'Polly.Joanna', language: 'en-US' }
   );
   twiml.hangup();
+
+  // Broadcast call ended (non-blocking)
+  try {
+    const session = userSessions.get(callSid) || {};
+    const duration = session.startTime ? Math.floor((Date.now() - session.startTime) / 1000) : 0;
+    broadcastCallEnded(callSid, duration);
+  } catch (error) {
+    // Silent fail
+  }
 
   // Clean up session
   userSessions.delete(callSid);
@@ -647,19 +858,253 @@ function redirectWelcome() {
   return twiml.toString();
 }
 
+// ========================================
+// REST API Endpoints for Frontend
+// ========================================
+
+/**
+ * GET /api/history - Get all call history with optional filters
+ * Query params: phoneNumber, subject, limit, skip
+ */
+app.get('/api/history', async (req, res) => {
+  try {
+    const { phoneNumber, subject, limit, skip } = req.query;
+    const options = {
+      phoneNumber,
+      subject,
+      limit: limit ? parseInt(limit) : 50,
+      skip: skip ? parseInt(skip) : 0
+    };
+
+    const history = await getAllHistory(options);
+
+    res.json({
+      success: true,
+      count: history.length,
+      data: history
+    });
+  } catch (error) {
+    console.error('Error fetching history:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch history'
+    });
+  }
+});
+
+/**
+ * GET /api/history/:phoneNumber - Get history for specific user
+ */
+app.get('/api/history/:phoneNumber', async (req, res) => {
+  try {
+    const { phoneNumber } = req.params;
+    const { limit } = req.query;
+
+    const history = await getAllHistory({
+      phoneNumber,
+      limit: limit ? parseInt(limit) : 50
+    });
+
+    res.json({
+      success: true,
+      phoneNumber,
+      count: history.length,
+      data: history
+    });
+  } catch (error) {
+    console.error('Error fetching user history:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch user history'
+    });
+  }
+});
+
+/**
+ * GET /api/stats - Get aggregate statistics
+ * Query params: phoneNumber (optional)
+ */
+app.get('/api/stats', async (req, res) => {
+  try {
+    const { phoneNumber } = req.query;
+
+    if (phoneNumber) {
+      // Get stats for specific user
+      const stats = await getUserStats(phoneNumber);
+      res.json({
+        success: true,
+        phoneNumber,
+        ...stats
+      });
+    } else {
+      // Get overall stats (all users)
+      const allHistory = await getAllHistory({ limit: 1000 });
+      const totalCalls = allHistory.length;
+      const uniqueUsers = [...new Set(allHistory.map(h => h.user_id))].length;
+      const subjectCounts = {};
+
+      allHistory.forEach(h => {
+        subjectCounts[h.subject] = (subjectCounts[h.subject] || 0) + 1;
+      });
+
+      res.json({
+        success: true,
+        totalCalls,
+        uniqueUsers,
+        subjectCounts
+      });
+    }
+  } catch (error) {
+    console.error('Error fetching stats:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch stats'
+    });
+  }
+});
+
+/**
+ * GET /api/calls/active - Get active call sessions
+ */
+app.get('/api/calls/active', (req, res) => {
+  try {
+    const activeCalls = [];
+
+    userSessions.forEach((session, callSid) => {
+      activeCalls.push({
+        callSid,
+        fromNumber: session.fromNumber,
+        state: session.state,
+        language: session.detectedLanguageCode || session.language,
+        currentQuestion: session.currentQuestion,
+        questionCount: session.questions?.length || 0
+      });
+    });
+
+    res.json({
+      success: true,
+      count: activeCalls.length,
+      data: activeCalls
+    });
+  } catch (error) {
+    console.error('Error fetching active calls:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch active calls'
+    });
+  }
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     services: {
-      gemini: isGeminiInitialized(),
+      openai: isOpenAIInitialized(),
       mongodb: isConnected()
     }
   });
 });
 
-// Error handler for all routes
+// ========================================
+// Exotel Integration
+// ========================================
+
+/**
+ * GET /exotel/test - Test endpoint to verify server is reachable
+ */
+app.get('/exotel/test', (req, res) => {
+  console.log('✅ Test endpoint hit - Server is reachable!');
+  res.send('Exotel webhook endpoint is working! Server time: ' + new Date().toISOString());
+});
+
+/**
+ * GET/POST /exotel/incoming - Exotel missed call webhook
+ * Triggers Twilio outbound call to the caller's number
+ * Accepts both GET and POST methods (Exotel may use either)
+ */
+const handleExotelWebhook = async (req, res) => {
+  console.log('\n========================================');
+  console.log('🔔 EXOTEL WEBHOOK RECEIVED');
+  console.log(`📡 Method: ${req.method}`);
+  console.log('========================================');
+
+  // Exotel may send data via query params (GET) or body (POST)
+  const params = req.method === 'GET' ? req.query : req.body;
+  console.log('📦 Full params:', JSON.stringify(params, null, 2));
+
+  const fromNumber = params.From || params.from || params.CallFrom;
+  console.log(`📞 Caller Number (From): ${fromNumber}`);
+
+  if (!fromNumber) {
+    console.error('❌ ERROR: Missing From parameter in Exotel webhook');
+    console.error('📦 Available parameters:', Object.keys(params));
+    return res.status(400).send('Missing From parameter');
+  }
+
+  // Normalize phone number to E.164 format for Twilio
+  // Remove leading 0 and add +91 country code for Indian numbers
+  let normalizedNumber = fromNumber;
+  if (fromNumber.startsWith('0')) {
+    normalizedNumber = '+91' + fromNumber.substring(1);
+    console.log(`📱 Normalized number: ${fromNumber} → ${normalizedNumber}`);
+  } else if (!fromNumber.startsWith('+')) {
+    normalizedNumber = '+91' + fromNumber;
+    console.log(`📱 Added country code: ${fromNumber} → ${normalizedNumber}`);
+  }
+
+  // Initialize Twilio client
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER || '+18588082832';
+
+  console.log('\n🔧 Twilio Configuration:');
+  console.log(`   From Number: ${twilioPhoneNumber}`);
+  console.log(`   To Number: ${normalizedNumber}`);
+  console.log(`   Webhook URL: ${process.env.BASE_URL}/ivr/welcome`);
+  console.log(`   Account SID: ${accountSid ? accountSid.substring(0, 10) + '...' : 'MISSING'}`);
+
+  const twilio = require('twilio');
+  const client = twilio(accountSid, authToken);
+
+  try {
+    console.log('\n⏳ Initiating Twilio outbound call...');
+
+    // Trigger Twilio outbound call
+    const call = await client.calls.create({
+      from: twilioPhoneNumber,
+      to: normalizedNumber,  // Normalized E.164 format number
+      url: `${process.env.BASE_URL}/ivr/welcome`
+    });
+
+    console.log('\n✅ SUCCESS: Twilio call initiated!');
+    console.log(`   Call SID: ${call.sid}`);
+    console.log(`   Status: ${call.status}`);
+    console.log(`   From: ${call.from}`);
+    console.log(`   To: ${call.to}`);
+    console.log(`   Direction: ${call.direction}`);
+    console.log('========================================\n');
+
+    res.status(200).send('OK');
+  } catch (error) {
+    console.error('\n❌ FAILED: Error creating Twilio call');
+    console.error(`   Error Message: ${error.message}`);
+    console.error(`   Error Code: ${error.code || 'N/A'}`);
+    console.error(`   Error Details: ${JSON.stringify(error, null, 2)}`);
+    console.log('========================================\n');
+
+    res.status(500).send('Error initiating call');
+  }
+};
+
+// Register both GET and POST routes
+app.get('/exotel/incoming', handleExotelWebhook);
+app.post('/exotel/incoming', handleExotelWebhook);
+
+// ========================================
+// Error Handler
+// ========================================
 app.use((err, req, res, next) => {
   console.error('❌ Server Error:', err);
   const twiml = new VoiceResponse();
@@ -671,6 +1116,7 @@ app.use((err, req, res, next) => {
 // Graceful shutdown
 process.on('SIGINT', async () => {
   console.log('\n🛑 Shutting down gracefully...');
+  closeWebSocket();
   await closeConnection();
   process.exit(0);
 });

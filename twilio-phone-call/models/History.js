@@ -125,6 +125,33 @@ class History {
   }
 
   /**
+   * Delete the oldest question for a user (to maintain limit)
+   * @param {string} userId - User's phone number
+   * @returns {Promise<Object>} Delete result
+   */
+  static async deleteOldestQuestion(userId) {
+    const collection = this.getCollection();
+    if (!collection) {
+      throw new Error('Database not connected');
+    }
+
+    // Find oldest question
+    const oldest = await collection
+      .find({ user_id: userId })
+      .sort({ timestamp: 1 })
+      .limit(1)
+      .toArray();
+
+    if (oldest.length > 0) {
+      const result = await collection.deleteOne({ _id: oldest[0]._id });
+      console.log(`🗑️  Deleted oldest question for ${userId}: "${oldest[0].question.substring(0, 50)}..."`);
+      return result;
+    }
+
+    return { deletedCount: 0 };
+  }
+
+  /**
    * Delete all records for a user (for testing/cleanup)
    * @param {string} userId - User's phone number
    * @returns {Promise<Object>} Delete result
@@ -192,6 +219,41 @@ class History {
 
     const document = this.createDocument(userId, subject, question, response);
     return await collection.insertOne(document);
+  }
+
+  /**
+   * Get all history with optional filters and pagination
+   * @param {Object} filters - Query filters
+   * @param {string} filters.phoneNumber - Filter by phone number (optional)
+   * @param {string} filters.subject - Filter by subject (optional)
+   * @param {number} filters.limit - Maximum records to return (default: 50)
+   * @param {number} filters.skip - Number of records to skip (default: 0)
+   * @returns {Promise<Array>} Array of history documents
+   */
+  static async getAllWithFilters(filters = {}) {
+    const collection = this.getCollection();
+    if (!collection) {
+      return [];
+    }
+
+    const { phoneNumber, subject, limit = 50, skip = 0 } = filters;
+    const query = {};
+
+    if (phoneNumber) {
+      query.user_id = phoneNumber;
+    }
+
+    if (subject) {
+      const escapedSubject = subject.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      query.subject = { $regex: new RegExp(escapedSubject, 'i') };
+    }
+
+    return await collection
+      .find(query)
+      .sort({ timestamp: -1 })
+      .skip(skip)
+      .limit(limit)
+      .toArray();
   }
 
 }
