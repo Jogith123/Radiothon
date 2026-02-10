@@ -6,14 +6,66 @@ const path = require('path');
 
 // Import modular services
 const { connectToMongoDB, closeConnection, isConnected } = require('./database/connection');
-const { initializeOpenAI, isInitialized: isOpenAIInitialized, generateAnswer, generateSummary } = require('./services/openaiService');
+const { initializeOpenAI, isOpenAIInitialized, generateAnswer, generateSummary } = require('./services/openaiService');
 const { initializeTTS, initializeSTT, textToSpeechConvert, transcribeAudio } = require('./services/speechService');
 const { storeQuestionAndAnswer, getHistoryBySubject, getUserStats, getAllHistory } = require('./services/historyService');
 const { initializeTranslation, detectLanguage, translateText, isTranslationAvailable } = require('./services/translationService');
 const { initializeWebSocket, broadcastCallStarted, broadcastQuestionTranscribed, broadcastAnswerGenerated, broadcastQASaved, broadcastCallEnded, broadcastPipelineStage, closeWebSocket } = require('./services/websocketService');
+const { getLanguageByDigit, getPrompt, getVoiceConfig, PROMPTS } = require('./config/languageConfig');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+/**
+ * Helper function to add multilingual prompt to TwiML
+ * For Telugu and Tamil: uses pre-generated audio files
+ * For English and Hindi: uses Polly TTS
+ * @param {object} twimlObject - Twilio gather or VoiceResponse object
+ * @param {string} promptKey - Key from languageConfig (e.g., 'askQuestion', 'welcome')
+ * @param {string} langCode - Language code (e.g., 'te-IN', 'ta-IN', 'en-US', 'hi-IN')
+ * @param {object} options - Additional options (loop, etc.)
+ */
+function addMultilingualPrompt(twimlObject, promptKey, langCode, options = {}) {
+  // Map prompt keys to audio file names
+  const audioFileMap = {
+    'welcome': langCode === 'te-IN' ? 'welcome_telugu' : 'welcome_tamil',
+    'mainMenu': langCode === 'te-IN' ? 'menu_telugu' : 'menu_tamil',
+    'askQuestion': langCode === 'te-IN' ? 'ask_question_telugu' : 'ask_question_tamil',
+    'recordingStopped': langCode === 'te-IN' ? 'recording_stopped_telugu' : 'recording_stopped_tamil',
+    'questionRecorded': langCode === 'te-IN' ? 'question_recorded_telugu' : 'question_recorded_tamil',
+    'questionRecordedOptions': langCode === 'te-IN' ? 'question_recorded_options_telugu' : 'question_recorded_options_tamil',
+    'processingQuestion': langCode === 'te-IN' ? 'processing_telugu' : 'processing_tamil',
+    'afterAnswer': langCode === 'te-IN' ? 'after_answer_telugu' : 'after_answer_tamil',
+    'noQuestion': langCode === 'te-IN' ? 'no_question_telugu' : 'no_question_tamil',
+    'stillProcessing': langCode === 'te-IN' ? 'still_processing_telugu' : 'still_processing_tamil',
+    'summaryRequest': langCode === 'te-IN' ? 'summary_request_telugu' : 'summary_request_tamil',
+    'followUpPrompt': langCode === 'te-IN' ? 'followup_prompt_telugu' : 'followup_prompt_tamil',
+    'followUpRecorded': langCode === 'te-IN' ? 'followup_recorded_telugu' : 'followup_recorded_tamil',
+    'noPreviousQuestion': langCode === 'te-IN' ? 'no_previous_telugu' : 'no_previous_tamil',
+    'goodbye': langCode === 'te-IN' ? 'goodbye_telugu' : 'goodbye_tamil',
+    'invalidOption': langCode === 'te-IN' ? 'invalid_option_telugu' : 'invalid_option_tamil',
+    'aiServiceError': langCode === 'te-IN' ? 'ai_error_telugu' : 'ai_error_tamil',
+    'databaseError': langCode === 'te-IN' ? 'db_error_telugu' : 'db_error_tamil',
+    'generalError': langCode === 'te-IN' ? 'general_error_telugu' : 'general_error_tamil'
+  };
+
+  // For Telugu and Tamil, use pre-generated audio
+  if (langCode === 'te-IN' || langCode === 'ta-IN') {
+    const audioFile = audioFileMap[promptKey];
+    if (audioFile) {
+      twimlObject.play(`${process.env.BASE_URL}/audio/${audioFile}.mp3`);
+    } else {
+      // Fallback to English if audio file not found
+      const prompt = getPrompt(promptKey, 'en-US');
+      twimlObject.say(prompt, { voice: 'Polly.Joanna', language: 'en-US', ...options });
+    }
+  } else {
+    // For English and Hindi, use Polly TTS
+    const prompt = getPrompt(promptKey, langCode);
+    const voiceConfig = getVoiceConfig(langCode);
+    twimlObject.say(prompt, { ...voiceConfig, ...options });
+  }
+}
 
 // Middleware
 app.use(bodyParser.urlencoded({ extended: false }));
@@ -76,31 +128,70 @@ app.post('/ivr/welcome', (req, res) => {
   userSessions.set(callSid, {
     questions: [],
     currentQuestion: null,
-    state: 'welcome',
+    state: 'language_selection',
     fromNumber: fromNumber,
-    language: 'en-US',  // Default to English, auto-detected from speech
+    language: 'en-US',  // Default to English for speech recognition
+    selectedLanguage: null,  // Will be set after language selection
     startTime: Date.now() // Track call start time for duration
   });
 
   const twiml = new VoiceResponse();
   const gather = twiml.gather({
-    action: `${process.env.BASE_URL}/ivr/menu`,
+    action: `${process.env.BASE_URL}/ivr/language-selected`,
     numDigits: '1',
     method: 'POST',
     timeout: 10
   });
 
-  gather.say(
-    'Welcome to Vidya Vani, your AI powered educational assistant. ' +
-    'Press 1 to ask a question. ' +
-    'Press 2 to stop recording. ' +
-    'Press 3 to get the answer. ' +
-    'Press 4 to get a summary of your last 5 questions on a subject. ' +
-    'Press 5 to stop and return to main menu. ' +
-    'Press 6 to add more details to your last question. ' +
-    'Press 9 to end the call.',
-    { voice: 'Polly.Joanna', language: 'en-US', loop: 2 }
-  );
+  // Play pre-generated language selection audio files (using Google TTS)
+  // Amazon Polly doesn't support Telugu and Tamil, so we use pre-generated files
+  const languageAudioFiles = [
+    'lang_select_english.mp3',
+    'lang_select_hindi.mp3',
+    'lang_select_telugu.mp3',
+    'lang_select_tamil.mp3'
+  ];
+
+  languageAudioFiles.forEach(audioFile => {
+    gather.play(`${process.env.BASE_URL}/audio/${audioFile}`);
+  });
+
+  // If no input, repeat language selection
+  twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
+
+  res.type('text/xml');
+  res.send(twiml.toString());
+});
+
+// Language selection handler
+app.post('/ivr/language-selected', (req, res) => {
+  const digit = req.body.Digits;
+  const callSid = req.body.CallSid;
+  console.log(`🌐 Language selected: ${digit} (Call: ${callSid})`);
+
+  const twiml = new VoiceResponse();
+  const selectedLang = getLanguageByDigit(digit);
+
+  if (selectedLang) {
+    // Store language preference in session
+    const session = userSessions.get(callSid) || {};
+    session.selectedLanguage = selectedLang.code;
+    session.state = 'language_confirmed';
+    userSessions.set(callSid, session);
+
+    console.log(`✅ Language set to: ${selectedLang.name} (${selectedLang.code})`);
+
+    // Welcome message in selected language
+    addMultilingualPrompt(twiml, 'welcome', selectedLang.code);
+
+    // Redirect to main menu with language parameter
+    twiml.redirect(`${process.env.BASE_URL}/ivr/menu?lang=${digit}`);
+  } else {
+    // Invalid selection
+    console.log(`⚠️  Invalid language selection: ${digit}`);
+    addMultilingualPrompt(twiml, 'invalidLanguage', 'en-US');
+    twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
+  }
 
   res.type('text/xml');
   res.send(twiml.toString());
@@ -110,7 +201,40 @@ app.post('/ivr/welcome', (req, res) => {
 app.post('/ivr/menu', async (req, res) => {
   const digit = req.body.Digits;
   const callSid = req.body.CallSid;
+  const langDigit = req.query.lang || req.body.lang;
+
   console.log(`🔢 User pressed: ${digit} (Call: ${callSid})`);
+
+  // Get session and language
+  const session = userSessions.get(callSid) || {};
+  const selectedLangCode = session.selectedLanguage || 'en-US';
+
+  // If this is first time showing menu (no digit pressed yet), show the menu
+  if (!digit) {
+    const twiml = new VoiceResponse();
+    const gather = twiml.gather({
+      action: `${process.env.BASE_URL}/ivr/menu`,
+      numDigits: '1',
+      method: 'POST',
+      timeout: 10
+    });
+
+    // For Telugu and Tamil, use pre-generated audio files (Polly doesn't support them)
+    // For English and Hindi, use Polly say verb
+    if (selectedLangCode === 'te-IN') {
+      gather.play(`${process.env.BASE_URL}/audio/menu_telugu.mp3`);
+    } else if (selectedLangCode === 'ta-IN') {
+      gather.play(`${process.env.BASE_URL}/audio/menu_tamil.mp3`);
+    } else {
+      const menuPrompt = getPrompt('mainMenu', selectedLangCode);
+      const voiceConfig = getVoiceConfig(selectedLangCode);
+      gather.say(menuPrompt, { ...voiceConfig, loop: 2 });
+    }
+
+    res.type('text/xml');
+    res.send(twiml.toString());
+    return;
+  }
 
   const optionActions = {
     '1': askQuestion,
@@ -130,12 +254,12 @@ app.post('/ivr/menu', async (req, res) => {
     } catch (error) {
       console.error(`❌ Error in menu option ${digit}:`, error);
       res.type('text/xml');
-      res.send(redirectWelcome());
+      res.send(redirectWelcome(callSid));
     }
   } else {
     console.log(`⚠️  Invalid option: ${digit}`);
     res.type('text/xml');
-    res.send(redirectWelcome());
+    res.send(redirectWelcome(callSid));
   }
 });
 
@@ -147,11 +271,9 @@ async function askQuestion(callSid, req) {
   userSessions.set(callSid, session);
 
   const twiml = new VoiceResponse();
+  const selectedLangCode = session.selectedLanguage || 'en-US';
 
-  twiml.say(
-    'Please ask your educational question after the beep. Press 2 to stop recording.',
-    { voice: 'Polly.Joanna', language: 'en-US' }
-  );
+  addMultilingualPrompt(twiml, 'askQuestion', selectedLangCode);
 
   twiml.record({
     action: `${process.env.BASE_URL}/ivr/question-recorded`,
@@ -167,12 +289,12 @@ async function askQuestion(callSid, req) {
 
 // Stop recording handler (when user presses 2)
 function stopRecording(callSid, req) {
+  const session = userSessions.get(callSid) || {};
+  const selectedLangCode = session.selectedLanguage || 'en-US';
+
   const twiml = new VoiceResponse();
 
-  twiml.say(
-    'Recording stopped. Your question is being processed. Please press 3 to hear the answer.',
-    { voice: 'Polly.Joanna', language: 'en-US' }
-  );
+  addMultilingualPrompt(twiml, 'recordingStopped', selectedLangCode);
 
   const gather = twiml.gather({
     action: `${process.env.BASE_URL}/ivr/menu`,
@@ -181,10 +303,7 @@ function stopRecording(callSid, req) {
     timeout: 10
   });
 
-  gather.say(
-    'Press 3 for answer, or press 1 for new question.',
-    { voice: 'Polly.Joanna', language: 'en-US', loop: 3 }
-  );
+  addMultilingualPrompt(gather, 'afterAnswer', selectedLangCode, { loop: 3 });
 
   return twiml.toString();
 }
@@ -206,12 +325,10 @@ app.post('/ivr/question-recorded', async (req, res) => {
     console.error(`❌ Transcription error for ${callSid}:`, err);
   });
 
+  const selectedLangCode = session.selectedLanguage || 'en-US';
+
   const twiml = new VoiceResponse();
-  twiml.say(
-    'Thank you. Your question is being processed. ' +
-    'Please press 3 to hear the answer, or press 1 to ask another question.',
-    { voice: 'Polly.Joanna', language: 'en-US' }
-  );
+  addMultilingualPrompt(twiml, 'questionRecorded', selectedLangCode);
 
   const gather = twiml.gather({
     action: `${process.env.BASE_URL}/ivr/menu`,
@@ -220,10 +337,9 @@ app.post('/ivr/question-recorded', async (req, res) => {
     timeout: 10
   });
 
-  gather.say(
-    'Press 3 for answer, or press 1 for new question.',
-    { voice: 'Polly.Joanna', language: 'en-US', loop: 3 }
-  );
+
+  addMultilingualPrompt(gather, 'questionRecordedOptions', selectedLangCode, { loop: 3 });
+
 
   res.type('text/xml');
   res.send(twiml.toString());
@@ -365,12 +481,15 @@ async function getAnswer(callSid, req) {
 
   const twiml = new VoiceResponse();
 
+  const selectedLangCode = session.selectedLanguage || 'en-US';
+  const voiceConfig = getVoiceConfig(selectedLangCode);
+
   // Check if transcription is still processing
   if (session.state === 'processing_transcription') {
     console.log(`⏳ Transcription still processing for call: ${callSid}`);
     twiml.say(
-      'Your question is still being processed. Please wait a moment and press 3 again.',
-      { voice: 'Polly.Joanna', language: 'en-US' }
+      getPrompt('stillProcessing', selectedLangCode),
+      voiceConfig
     );
     twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
     return twiml.toString();
@@ -379,8 +498,8 @@ async function getAnswer(callSid, req) {
   if (!question) {
     console.log(`⚠️  No question found for call: ${callSid}`);
     twiml.say(
-      'No question found. Please press 1 to ask a question first.',
-      { voice: 'Polly.Joanna', language: 'en-US' }
+      getPrompt('noQuestion', selectedLangCode),
+      voiceConfig
     );
     twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
     return twiml.toString();
@@ -404,8 +523,8 @@ async function getAnswer(callSid, req) {
     // const question = session.currentQuestion; // This line is already present above, no need to duplicate.
 
     twiml.say(
-      'Processing your question with AI. Please wait.',
-      { voice: 'Polly.Joanna', language: 'en-US' }
+      getPrompt('processingQuestion', selectedLangCode),
+      voiceConfig
     );
 
     console.log(`🤖 Sending to OpenAI: ${question}`);
@@ -488,8 +607,8 @@ async function getAnswer(callSid, req) {
     });
 
     gather.say(
-      'Press 1 to ask another question, or press 9 to end the call.',
-      { voice: 'Polly.Joanna', language: 'en-US' }
+      getPrompt('afterAnswer', selectedLangCode),
+      voiceConfig
     );
 
   } catch (error) {
@@ -511,13 +630,15 @@ async function getSummary(callSid, req) {
   const fromNumber = session.fromNumber || req.body.From;
 
   const twiml = new VoiceResponse();
+  const selectedLangCode = session.selectedLanguage || 'en-US';
+  const voiceConfig = getVoiceConfig(selectedLangCode);
 
   try {
     // Check if MongoDB is available
     if (!isConnected()) {
       twiml.say(
-        'Sorry, database service is not available. This feature requires database connection.',
-        { voice: 'Polly.Joanna', language: 'en-US' }
+        getPrompt('databaseError', selectedLangCode),
+        voiceConfig
       );
       twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
       return twiml.toString();
@@ -526,8 +647,8 @@ async function getSummary(callSid, req) {
     // Check if OpenAI is available
     if (!isOpenAIInitialized()) {
       twiml.say(
-        'Sorry, AI service is not configured. Please add your OpenAI API key to the environment file.',
-        { voice: 'Polly.Joanna', language: 'en-US' }
+        getPrompt('aiServiceError', selectedLangCode),
+        voiceConfig
       );
       twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
       return twiml.toString();
@@ -535,8 +656,8 @@ async function getSummary(callSid, req) {
 
     // Ask user for subject
     twiml.say(
-      'Please tell me the subject you need to summarize.',
-      { voice: 'Polly.Joanna', language: 'en-US' }
+      getPrompt('summaryRequest', selectedLangCode),
+      voiceConfig
     );
 
     // Record the subject name
@@ -552,8 +673,8 @@ async function getSummary(callSid, req) {
   } catch (error) {
     console.error('Error in getSummary:', error);
     twiml.say(
-      'Sorry, I encountered an error. Please try again.',
-      { voice: 'Polly.Joanna', language: 'en-US' }
+      getPrompt('generalError', selectedLangCode),
+      voiceConfig
     );
     twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
   }
@@ -565,6 +686,8 @@ async function getSummary(callSid, req) {
 async function followUpQuestion(callSid, req) {
   console.log(`🔄 Follow-up question for call: ${callSid}`);
   const session = userSessions.get(callSid) || {};
+  const selectedLangCode = session.selectedLanguage || 'en-US';
+  const voiceConfig = getVoiceConfig(selectedLangCode);
 
   const twiml = new VoiceResponse();
 
@@ -572,8 +695,8 @@ async function followUpQuestion(callSid, req) {
   if (!session.currentQuestion) {
     console.log(`⚠️  No previous question found for call: ${callSid}`);
     twiml.say(
-      'No previous question found. Please press 1 to ask a question first.',
-      { voice: 'Polly.Joanna', language: 'en-US' }
+      getPrompt('noPreviousQuestion', selectedLangCode),
+      voiceConfig
     );
     twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
     return twiml.toString();
@@ -586,8 +709,8 @@ async function followUpQuestion(callSid, req) {
   userSessions.set(callSid, session);
 
   twiml.say(
-    'You can add more details to the last question. Please speak now and press 2 when finished.',
-    { voice: 'Polly.Joanna', language: 'en-US' }
+    getPrompt('followUpPrompt', selectedLangCode),
+    voiceConfig
   );
 
   twiml.record({
@@ -610,6 +733,8 @@ app.post('/ivr/process-summary', async (req, res) => {
 
   const session = userSessions.get(callSid) || {};
   const fromNumber = session.fromNumber || req.body.From;
+  const selectedLangCode = session.selectedLanguage || 'en-US';
+  const voiceConfig = getVoiceConfig(selectedLangCode);
 
   const twiml = new VoiceResponse();
 
@@ -652,8 +777,8 @@ app.post('/ivr/process-summary', async (req, res) => {
       console.log(`📚 User's available subjects: ${stats.subjectStats.map(s => s._id).join(', ')}`);
 
       twiml.say(
-        `You have not asked any questions about ${subjectName} yet. Please ask some questions first, then request a summary.`,
-        { voice: 'Polly.Joanna', language: 'en-US' }
+        getPrompt('noSummary', selectedLangCode, { subject: subjectName }),
+        voiceConfig
       );
       twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
       res.type('text/xml');
@@ -670,8 +795,8 @@ app.post('/ivr/process-summary', async (req, res) => {
     const audioFileName = await textToSpeechConvert(summary, callSid);
 
     twiml.say(
-      `Here is your learning summary for ${subjectName}, based on your last ${history.length} questions.`,
-      { voice: 'Polly.Joanna', language: 'en-US' }
+      getPrompt('summaryIntro', selectedLangCode, { subject: subjectName, count: history.length }),
+      voiceConfig
     );
 
     twiml.pause({ length: 1 });
@@ -692,15 +817,15 @@ app.post('/ivr/process-summary', async (req, res) => {
     });
 
     gather.say(
-      'Press 1 to ask another question, press 4 for another summary, or press 9 to end the call.',
-      { voice: 'Polly.Joanna', language: 'en-US' }
+      getPrompt('afterSummary', selectedLangCode),
+      voiceConfig
     );
 
   } catch (error) {
     console.error('❌ Error processing summary:', error);
     twiml.say(
-      'Sorry, I encountered an error generating your summary. Please try again.',
-      { voice: 'Polly.Joanna', language: 'en-US' }
+      getPrompt('generalError', selectedLangCode),
+      voiceConfig
     );
     twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
   }
@@ -792,11 +917,13 @@ app.post('/ivr/followup-recorded', async (req, res) => {
     console.error(`❌ Follow-up transcription error for ${callSid}:`, err);
   });
 
+  const selectedLangCode = session.selectedLanguage || 'en-US';
+  const voiceConfig = getVoiceConfig(selectedLangCode);
+
   const twiml = new VoiceResponse();
   twiml.say(
-    'Thank you. Your additional details are being processed. ' +
-    'Please press 3 to hear the updated answer.',
-    { voice: 'Polly.Joanna', language: 'en-US' }
+    getPrompt('followUpRecorded', selectedLangCode),
+    voiceConfig
   );
 
   const gather = twiml.gather({
@@ -825,10 +952,14 @@ function returnToMenu(callSid, req) {
 
 // End call
 function endCall(callSid, req) {
+  const session = userSessions.get(callSid) || {};
+  const selectedLangCode = session.selectedLanguage || 'en-US';
+  const voiceConfig = getVoiceConfig(selectedLangCode);
+
   const twiml = new VoiceResponse();
   twiml.say(
-    'Thank you for using Vidya Vani. Goodbye!',
-    { voice: 'Polly.Joanna', language: 'en-US' }
+    getPrompt('goodbye', selectedLangCode),
+    voiceConfig
   );
   twiml.hangup();
 
@@ -848,11 +979,15 @@ function endCall(callSid, req) {
 }
 
 // Redirect to welcome
-function redirectWelcome() {
+function redirectWelcome(callSid) {
+  const session = userSessions.get(callSid) || {};
+  const selectedLangCode = session.selectedLanguage || 'en-US';
+  const voiceConfig = getVoiceConfig(selectedLangCode);
+
   const twiml = new VoiceResponse();
   twiml.say(
-    'Invalid option. Returning to the main menu.',
-    { voice: 'Polly.Joanna', language: 'en-US' }
+    getPrompt('invalidOption', selectedLangCode),
+    voiceConfig
   );
   twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
   return twiml.toString();

@@ -11,11 +11,10 @@ const client = twilio(accountSid, authToken);
 async function createCall() {
   try {
     const call = await client.calls.create({
-      from: "+18588082832",
-      to: "+919392330425",
+      from: "+13369336477",
+      to: "+918712347304",
       url: `${process.env.BASE_URL}/ivr/welcome`,
     });
-
     console.log("Call initiated successfully!");
     console.log("Call SID:", call.sid);
   } catch (error) {
@@ -24,3 +23,4 @@ async function createCall() {
 }
 
 createCall();
+
