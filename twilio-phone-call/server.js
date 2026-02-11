@@ -39,6 +39,7 @@ function addMultilingualPrompt(twimlObject, promptKey, langCode, options = {}) {
     'noQuestion': langCode === 'te-IN' ? 'no_question_telugu' : 'no_question_tamil',
     'stillProcessing': langCode === 'te-IN' ? 'still_processing_telugu' : 'still_processing_tamil',
     'summaryRequest': langCode === 'te-IN' ? 'summary_request_telugu' : 'summary_request_tamil',
+    'afterSummary': langCode === 'te-IN' ? 'after_summary_telugu' : 'after_summary_tamil',
     'followUpPrompt': langCode === 'te-IN' ? 'followup_prompt_telugu' : 'followup_prompt_tamil',
     'followUpRecorded': langCode === 'te-IN' ? 'followup_recorded_telugu' : 'followup_recorded_tamil',
     'noPreviousQuestion': langCode === 'te-IN' ? 'no_previous_telugu' : 'no_previous_tamil',
@@ -53,7 +54,12 @@ function addMultilingualPrompt(twimlObject, promptKey, langCode, options = {}) {
   if (langCode === 'te-IN' || langCode === 'ta-IN') {
     const audioFile = audioFileMap[promptKey];
     if (audioFile) {
-      twimlObject.play(`${process.env.BASE_URL}/audio/${audioFile}.mp3`);
+      const audioUrl = `${process.env.BASE_URL}/audio/${audioFile}.mp3`;
+      // Handle loop option for audio files by repeating play() calls
+      const loopCount = options.loop || 1;
+      for (let i = 0; i < loopCount; i++) {
+        twimlObject.play(audioUrl);
+      }
     } else {
       // Fallback to English if audio file not found
       const prompt = getPrompt(promptKey, 'en-US');
@@ -487,20 +493,14 @@ async function getAnswer(callSid, req) {
   // Check if transcription is still processing
   if (session.state === 'processing_transcription') {
     console.log(`⏳ Transcription still processing for call: ${callSid}`);
-    twiml.say(
-      getPrompt('stillProcessing', selectedLangCode),
-      voiceConfig
-    );
+    addMultilingualPrompt(twiml, 'stillProcessing', selectedLangCode);
     twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
     return twiml.toString();
   }
 
   if (!question) {
     console.log(`⚠️  No question found for call: ${callSid}`);
-    twiml.say(
-      getPrompt('noQuestion', selectedLangCode),
-      voiceConfig
-    );
+    addMultilingualPrompt(twiml, 'noQuestion', selectedLangCode);
     twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
     return twiml.toString();
   }
@@ -522,10 +522,7 @@ async function getAnswer(callSid, req) {
     // Get the question from session
     // const question = session.currentQuestion; // This line is already present above, no need to duplicate.
 
-    twiml.say(
-      getPrompt('processingQuestion', selectedLangCode),
-      voiceConfig
-    );
+    addMultilingualPrompt(twiml, 'processingQuestion', selectedLangCode);
 
     console.log(`🤖 Sending to OpenAI: ${question}`);
     const answerEnglish = await generateAnswer(question);
@@ -606,10 +603,7 @@ async function getAnswer(callSid, req) {
       timeout: 10
     });
 
-    gather.say(
-      getPrompt('afterAnswer', selectedLangCode),
-      voiceConfig
-    );
+    addMultilingualPrompt(gather, 'afterAnswer', selectedLangCode);
 
   } catch (error) {
     console.error('Error getting answer from OpenAI:', error);
@@ -655,10 +649,7 @@ async function getSummary(callSid, req) {
     }
 
     // Ask user for subject
-    twiml.say(
-      getPrompt('summaryRequest', selectedLangCode),
-      voiceConfig
-    );
+    addMultilingualPrompt(twiml, 'summaryRequest', selectedLangCode);
 
     // Record the subject name
     twiml.record({
@@ -708,10 +699,7 @@ async function followUpQuestion(callSid, req) {
   session.originalQuestionBeforeFollowup = session.currentQuestion;
   userSessions.set(callSid, session);
 
-  twiml.say(
-    getPrompt('followUpPrompt', selectedLangCode),
-    voiceConfig
-  );
+  addMultilingualPrompt(twiml, 'followUpPrompt', selectedLangCode);
 
   twiml.record({
     action: `${process.env.BASE_URL}/ivr/followup-recorded`,
@@ -816,17 +804,11 @@ app.post('/ivr/process-summary', async (req, res) => {
       timeout: 10
     });
 
-    gather.say(
-      getPrompt('afterSummary', selectedLangCode),
-      voiceConfig
-    );
+    addMultilingualPrompt(gather, 'afterSummary', selectedLangCode);
 
   } catch (error) {
     console.error('❌ Error processing summary:', error);
-    twiml.say(
-      getPrompt('generalError', selectedLangCode),
-      voiceConfig
-    );
+    addMultilingualPrompt(twiml, 'generalError', selectedLangCode);
     twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
   }
 
@@ -921,10 +903,7 @@ app.post('/ivr/followup-recorded', async (req, res) => {
   const voiceConfig = getVoiceConfig(selectedLangCode);
 
   const twiml = new VoiceResponse();
-  twiml.say(
-    getPrompt('followUpRecorded', selectedLangCode),
-    voiceConfig
-  );
+  addMultilingualPrompt(twiml, 'followUpRecorded', selectedLangCode);
 
   const gather = twiml.gather({
     action: `${process.env.BASE_URL}/ivr/menu`,
@@ -933,10 +912,7 @@ app.post('/ivr/followup-recorded', async (req, res) => {
     timeout: 10
   });
 
-  gather.say(
-    'Press 3 for answer, or press 1 for new question.',
-    { voice: 'Polly.Joanna', language: 'en-US', loop: 3 }
-  );
+  addMultilingualPrompt(gather, 'questionRecordedOptions', selectedLangCode, { loop: 3 });
 
   res.type('text/xml');
   res.send(twiml.toString());
