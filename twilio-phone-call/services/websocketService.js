@@ -1,7 +1,7 @@
 /**
  * WebSocket Service
  * Provides real-time updates to connected frontend clients
- * Port: 5050 (separate from main Express server on 3000)
+ * Attaches to the same HTTP server as Express (single port for Railway/production)
  */
 
 const WebSocket = require('ws');
@@ -11,11 +11,12 @@ const clients = new Set();
 
 /**
  * Initialize WebSocket server
- * @param {number} port - Port to run WebSocket server (default: 5050)
+ * @param {import('http').Server} httpServer - The HTTP server to attach WebSocket to
  */
-function initializeWebSocket(port = 5050) {
+function initializeWebSocket(httpServer) {
     try {
-        wss = new WebSocket.Server({ port });
+        // Attach to existing HTTP server on path /ws (shares the same port)
+        wss = new WebSocket.Server({ server: httpServer, path: '/ws' });
 
         wss.on('connection', (ws) => {
             console.log('✅ WebSocket client connected');
@@ -33,7 +34,6 @@ function initializeWebSocket(port = 5050) {
                 try {
                     const data = JSON.parse(message);
                     console.log('📨 Received from client:', data);
-                    // Handle client requests here if needed
                 } catch (error) {
                     console.error('Error parsing client message:', error.message);
                 }
@@ -52,7 +52,11 @@ function initializeWebSocket(port = 5050) {
             });
         });
 
-        console.log(`✅ WebSocket server initialized on port ${port}`);
+        wss.on('error', (error) => {
+            console.error('❌ WebSocket server error:', error.message);
+        });
+
+        console.log(`✅ WebSocket server initialized on /ws (shared HTTP server)`);
         return true;
     } catch (error) {
         console.error('❌ Failed to initialize WebSocket server:', error.message);

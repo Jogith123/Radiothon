@@ -31,9 +31,11 @@ export const WebSocketProvider = ({ children }) => {
     const reconnectTimeoutRef = useRef(null);
 
     const connect = useCallback(() => {
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        // const wsUrl = `${wsProtocol}//${window.location.hostname}:5050`;
-        const wsUrl = import.meta.env.VITE_WS_URL || `ws://localhost:5050`;
+        // Build WebSocket URL from API base or use explicit WS_URL
+        // WebSocket is on the same port as the API server at path /ws
+        const apiBase = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+        const wsBase = apiBase.replace(/^http/, 'ws');
+        const wsUrl = import.meta.env.VITE_WS_URL || `${wsBase}/ws`;
 
         console.log('Connecting to WS:', wsUrl);
 

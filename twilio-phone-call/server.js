@@ -1,5 +1,6 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
+const http = require('http');
 const express = require('express');
 const bodyParser = require('body-parser');
 const VoiceResponse = require('twilio').twiml.VoiceResponse;
@@ -31,6 +32,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// Create HTTP server (shared between Express and WebSocket)
+const server = http.createServer(app);
+
 // Initialize all services
 async function initializeServices() {
   console.log('🚀 Initializing Vidya Vani services...\n');
@@ -50,8 +54,8 @@ async function initializeServices() {
   // Initialize MongoDB
   await connectToMongoDB();
 
-  // Initialize WebSocket server (port 5050)
-  initializeWebSocket(5050);
+  // Initialize WebSocket on shared HTTP server (same port, path /ws)
+  initializeWebSocket(server);
 
   console.log('\n✅ All services initialized\n');
 }
@@ -1327,8 +1331,9 @@ process.on('SIGINT', async () => {
 async function startServer() {
   await initializeServices();
 
-  app.listen(PORT, () => {
+  server.listen(PORT, () => {
     console.log(`🚀 Server is running on port ${PORT}`);
+    console.log(`🔌 WebSocket available at ws://localhost:${PORT}/ws`);
     console.log(`📞 Twilio webhook URL: ${process.env.BASE_URL || `http://localhost:${PORT}`}/ivr/welcome`);
   });
 }
