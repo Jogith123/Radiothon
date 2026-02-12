@@ -2,9 +2,9 @@
   "name": "twilio-phone-call",
   "version": "1.0.0",
   "description": "Make phone calls using Twilio API",
-  "main": "makeCall.js",
+  "main": "server.js",
   "scripts": {
-    "start": "node makeCall.js",
+    "start": "node server.js",
     "server": "node server.js",
     "dev": "set PORT=3001&& nodemon server.js",
     "tunnel": "lt --port 3000",
