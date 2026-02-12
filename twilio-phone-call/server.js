@@ -1012,6 +1012,204 @@ app.get('/health', (req, res) => {
 });
 
 // ========================================
+// Analytics & Status API
+// ========================================
+
+/**
+ * GET /api/status - System status for dashboard
+ */
+app.get('/api/status', async (req, res) => {
+  try {
+    const activeCalls = [];
+    userSessions.forEach((session, callSid) => activeCalls.push(session));
+
+    // Get today's call count from MongoDB
+    const allHistory = await getAllHistory({ limit: 10000 });
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const callsToday = allHistory.filter(h => new Date(h.timestamp) >= today).length;
+
+    res.json({
+      success: true,
+      backend: isConnected() ? 'Online' : 'Degraded',
+      websocket: 'Connected',
+      activeSessions: activeCalls.length,
+      callsToday,
+      mongodb: isConnected(),
+      openai: isOpenAIInitialized()
+    });
+  } catch (error) {
+    res.json({
+      success: true,
+      backend: 'Online',
+      websocket: 'Connected',
+      activeSessions: userSessions.size,
+      callsToday: 0,
+      mongodb: isConnected(),
+      openai: isOpenAIInitialized()
+    });
+  }
+});
+
+/**
+ * GET /api/analytics/summary - Aggregate stats for Analytics page stat cards
+ */
+app.get('/api/analytics/summary', async (req, res) => {
+  try {
+    const allHistory = await getAllHistory({ limit: 50000 });
+    const now = new Date();
+
+    // This week (Mon-Sun)
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - now.getDay());
+    weekStart.setHours(0, 0, 0, 0);
+
+    const lastWeekStart = new Date(weekStart);
+    lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+
+    const thisWeek = allHistory.filter(h => new Date(h.timestamp) >= weekStart);
+    const lastWeek = allHistory.filter(h => {
+      const t = new Date(h.timestamp);
+      return t >= lastWeekStart && t < weekStart;
+    });
+
+    const totalCallsThisWeek = thisWeek.length;
+    const totalCallsLastWeek = lastWeek.length;
+    const callsTrend = totalCallsLastWeek > 0
+      ? (((totalCallsThisWeek - totalCallsLastWeek) / totalCallsLastWeek) * 100).toFixed(1)
+      : '0';
+
+    const uniqueStudentsThisWeek = [...new Set(thisWeek.map(h => h.user_id))].length;
+    const uniqueStudentsLastWeek = [...new Set(lastWeek.map(h => h.user_id))].length;
+    const studentsTrend = uniqueStudentsLastWeek > 0
+      ? (((uniqueStudentsThisWeek - uniqueStudentsLastWeek) / uniqueStudentsLastWeek) * 100).toFixed(1)
+      : '0';
+
+    // Avg questions per session (approximate by grouping by user per day)
+    const avgQuestionsPerUser = uniqueStudentsThisWeek > 0
+      ? (totalCallsThisWeek / uniqueStudentsThisWeek).toFixed(1)
+      : '0';
+
+    res.json({
+      success: true,
+      totalCalls: totalCallsThisWeek,
+      callsTrend: `${totalCallsThisWeek >= totalCallsLastWeek ? '+' : ''}${callsTrend}%`,
+      uniqueStudents: uniqueStudentsThisWeek,
+      studentsTrend: `${uniqueStudentsThisWeek >= uniqueStudentsLastWeek ? '+' : ''}${studentsTrend}%`,
+      avgQuestionsPerUser,
+      totalAllTime: allHistory.length
+    });
+  } catch (error) {
+    console.error('Error fetching analytics summary:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch analytics summary' });
+  }
+});
+
+/**
+ * GET /api/analytics/call-volume - Daily call volume for the week
+ */
+app.get('/api/analytics/call-volume', async (req, res) => {
+  try {
+    const allHistory = await getAllHistory({ limit: 50000 });
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const now = new Date();
+
+    // Last 7 days
+    const volumeByDay = {};
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      const dayName = days[d.getDay()];
+      const dateKey = d.toISOString().split('T')[0];
+      volumeByDay[dateKey] = { day: dayName, calls: 0, missed: 0 };
+    }
+
+    allHistory.forEach(h => {
+      const dateKey = new Date(h.timestamp).toISOString().split('T')[0];
+      if (volumeByDay[dateKey]) {
+        volumeByDay[dateKey].calls++;
+      }
+    });
+
+    res.json({
+      success: true,
+      data: Object.values(volumeByDay)
+    });
+  } catch (error) {
+    console.error('Error fetching call volume:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch call volume' });
+  }
+});
+
+/**
+ * GET /api/analytics/subjects - Subject distribution
+ */
+app.get('/api/analytics/subjects', async (req, res) => {
+  try {
+    const allHistory = await getAllHistory({ limit: 50000 });
+    const subjectCounts = {};
+
+    allHistory.forEach(h => {
+      const subject = h.subject || 'Unknown';
+      subjectCounts[subject] = (subjectCounts[subject] || 0) + 1;
+    });
+
+    // Convert to array sorted by count
+    const data = Object.entries(subjectCounts)
+      .map(([name, value]) => ({ name, value, subject: name, calls: value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 10); // Top 10 subjects
+
+    res.json({
+      success: true,
+      data
+    });
+  } catch (error) {
+    console.error('Error fetching subjects:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch subjects' });
+  }
+});
+
+/**
+ * GET /api/analytics/performance - Hourly performance data for today
+ */
+app.get('/api/analytics/performance', async (req, res) => {
+  try {
+    const allHistory = await getAllHistory({ limit: 50000 });
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const todayHistory = allHistory.filter(h => new Date(h.timestamp) >= today);
+
+    // Group by hour
+    const hourlyData = {};
+    for (let hour = 0; hour <= 23; hour++) {
+      const timeLabel = `${hour.toString().padStart(2, '0')}:00`;
+      hourlyData[hour] = { time: timeLabel, calls: 0, latency: 0 };
+    }
+
+    todayHistory.forEach(h => {
+      const hour = new Date(h.timestamp).getHours();
+      if (hourlyData[hour]) {
+        hourlyData[hour].calls++;
+      }
+    });
+
+    // Filter to hours that have passed + current hour
+    const currentHour = new Date().getHours();
+    const data = Object.values(hourlyData).filter((_, i) => i <= currentHour);
+
+    res.json({
+      success: true,
+      data
+    });
+  } catch (error) {
+    console.error('Error fetching performance:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch performance' });
+  }
+});
+
+// ========================================
 // Exotel Integration
 // ========================================
 

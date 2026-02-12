@@ -58,11 +58,16 @@ const PhoneSimulator = () => {
 
             try {
                 setTimeout(async () => {
-                    setCallStatus('Connected');
                     try {
                         await startCall.mutateAsync(dialedNumber);
+                        setCallStatus('Connected');
                     } catch (e) {
-                        console.log('Mock: Backend call failed but proceeding in demo mode');
+                        console.error('Backend call failed:', e.message);
+                        setCallStatus('Backend unavailable');
+                        setTimeout(() => {
+                            setActiveCall(false);
+                            setCallStatus('Ready');
+                        }, 3000);
                     }
                 }, 1500);
             } catch (err) {
