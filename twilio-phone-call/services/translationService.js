@@ -9,14 +9,34 @@ const fs = require('fs');
 let translateClient = null;
 
 /**
+ * Get Google credentials config - supports both file and env var
+ */
+function getGoogleCredentials() {
+    // Option 1: GOOGLE_CREDENTIALS env var (JSON string) - for Railway/cloud
+    if (process.env.GOOGLE_CREDENTIALS) {
+        try {
+            const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+            return { credentials };
+        } catch (e) {
+            console.log('⚠️  GOOGLE_CREDENTIALS env var is not valid JSON');
+        }
+    }
+    // Option 2: Key file path - for local development
+    const keyFile = process.env.GOOGLE_TTS_KEY_FILE || './google-credentials.json';
+    if (fs.existsSync(keyFile)) {
+        return { keyFilename: keyFile };
+    }
+    return null;
+}
+
+/**
  * Initialize Google Cloud Translation
  */
 function initializeTranslation() {
     try {
-        if (fs.existsSync(process.env.GOOGLE_TTS_KEY_FILE || './google-credentials.json')) {
-            translateClient = new Translate({
-                keyFilename: process.env.GOOGLE_TTS_KEY_FILE || './google-credentials.json'
-            });
+        const creds = getGoogleCredentials();
+        if (creds) {
+            translateClient = new Translate(creds);
             console.log('✅ Google Cloud Translation initialized');
             return true;
         } else {

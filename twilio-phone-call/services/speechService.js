@@ -14,14 +14,34 @@ let ttsClient = null;
 let sttClient = null;
 
 /**
+ * Get Google credentials config - supports both file and env var
+ */
+function getGoogleCredentials() {
+  // Option 1: GOOGLE_CREDENTIALS env var (JSON string) - for Railway/cloud
+  if (process.env.GOOGLE_CREDENTIALS) {
+    try {
+      const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+      return { credentials };
+    } catch (e) {
+      console.log('⚠️  GOOGLE_CREDENTIALS env var is not valid JSON');
+    }
+  }
+  // Option 2: Key file path - for local development
+  const keyFile = process.env.GOOGLE_TTS_KEY_FILE || './google-credentials.json';
+  if (fs.existsSync(keyFile)) {
+    return { keyFilename: keyFile };
+  }
+  return null;
+}
+
+/**
  * Initialize Google Text-to-Speech client
  */
 function initializeTTS() {
   try {
-    if (fs.existsSync(process.env.GOOGLE_TTS_KEY_FILE || './google-credentials.json')) {
-      ttsClient = new textToSpeech.TextToSpeechClient({
-        keyFilename: process.env.GOOGLE_TTS_KEY_FILE || './google-credentials.json'
-      });
+    const creds = getGoogleCredentials();
+    if (creds) {
+      ttsClient = new textToSpeech.TextToSpeechClient(creds);
       console.log('✅ Google TTS initialized');
       return true;
     } else {
@@ -29,7 +49,7 @@ function initializeTTS() {
       return false;
     }
   } catch (error) {
-    console.log('ℹ️  Google TTS unavailable - using Twilio TTS fallback');
+    console.log('ℹ️  Google TTS unavailable - using Twilio TTS fallback:', error.message);
     ttsClient = null;
     return false;
   }
@@ -40,10 +60,9 @@ function initializeTTS() {
  */
 function initializeSTT() {
   try {
-    if (fs.existsSync(process.env.GOOGLE_TTS_KEY_FILE || './google-credentials.json')) {
-      sttClient = new speech.SpeechClient({
-        keyFilename: process.env.GOOGLE_TTS_KEY_FILE || './google-credentials.json'
-      });
+    const creds = getGoogleCredentials();
+    if (creds) {
+      sttClient = new speech.SpeechClient(creds);
       console.log('✅ Google Speech-to-Text initialized');
       return true;
     } else {
@@ -51,7 +70,7 @@ function initializeSTT() {
       return false;
     }
   } catch (error) {
-    console.log('ℹ️  Google STT unavailable - using Twilio transcription fallback');
+    console.log('ℹ️  Google STT unavailable - using Twilio transcription fallback:', error.message);
     sttClient = null;
     return false;
   }
