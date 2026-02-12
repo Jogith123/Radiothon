@@ -1260,10 +1260,14 @@ const handleExotelWebhook = async (req, res) => {
     console.log(`📱 Added country code: ${fromNumber} → ${normalizedNumber}`);
   }
 
-  // Initialize Twilio client
+  // Respond to Exotel IMMEDIATELY — don't make it wait for Twilio API
+  res.status(200).send('OK');
+  console.log('✅ Acknowledged Exotel webhook (200 OK sent)');
+
+  // Now initiate Twilio call asynchronously (after response is sent)
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
-  const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER || '+18588082832';
+  const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER || '+12082959422';
 
   console.log('\n🔧 Twilio Configuration:');
   console.log(`   From Number: ${twilioPhoneNumber}`);
@@ -1277,10 +1281,9 @@ const handleExotelWebhook = async (req, res) => {
   try {
     console.log('\n⏳ Initiating Twilio outbound call...');
 
-    // Trigger Twilio outbound call
     const call = await client.calls.create({
       from: twilioPhoneNumber,
-      to: normalizedNumber,  // Normalized E.164 format number
+      to: normalizedNumber,
       url: `${process.env.BASE_URL}/ivr/welcome`
     });
 
@@ -1291,16 +1294,12 @@ const handleExotelWebhook = async (req, res) => {
     console.log(`   To: ${call.to}`);
     console.log(`   Direction: ${call.direction}`);
     console.log('========================================\n');
-
-    res.status(200).send('OK');
   } catch (error) {
     console.error('\n❌ FAILED: Error creating Twilio call');
     console.error(`   Error Message: ${error.message}`);
     console.error(`   Error Code: ${error.code || 'N/A'}`);
     console.error(`   Error Details: ${JSON.stringify(error, null, 2)}`);
     console.log('========================================\n');
-
-    res.status(500).send('Error initiating call');
   }
 };
 
