@@ -1,18 +1,12 @@
 /**
  * Auth Context
- * Simple admin-only authentication with hardcoded credentials.
- * No Firebase dependency — admin credentials are checked locally.
+ * Secure admin-only authentication via backend API.
+ * Credentials stored in MongoDB, never exposed to frontend.
  */
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
 const AuthContext = createContext(null);
-
-// Admin credentials
-const ADMIN_CREDENTIALS = [
-  { email: 'admin@vidyavani.gov.in', password: 'VidyaVani@2026', name: 'Administrator' },
-  { email: 'superadmin@vidyavani.gov.in', password: 'SuperAdmin@2026', name: 'Super Admin' },
-];
 
 const AUTH_STORAGE_KEY = 'vidyavani_admin_session';
 
@@ -25,6 +19,11 @@ export const useAuth = () => {
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Get backend URL from environment
+  const getBackendUrl = () => {
+    return import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+  };
 
   // Check for existing session on mount
   useEffect(() => {
@@ -39,35 +38,47 @@ export const AuthProvider = ({ children }) => {
           localStorage.removeItem(AUTH_STORAGE_KEY);
         }
       }
-    } catch {
+    } catch (error) {
+      console.error('Session restore error:', error);
       localStorage.removeItem(AUTH_STORAGE_KEY);
     }
     setLoading(false);
   }, []);
 
   const login = async (email, password) => {
-    const admin = ADMIN_CREDENTIALS.find(
-      (cred) => cred.email === email.toLowerCase().trim() && cred.password === password
-    );
+    try {
+      const backendUrl = getBackendUrl();
+      const response = await fetch(`${backendUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      });
 
-    if (!admin) {
-      throw { code: 'auth/invalid-credential', message: 'Invalid admin credentials' };
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw {
+          code: 'auth/invalid-credential',
+          message: data.message || 'Login failed',
+        };
+      }
+
+      // Store session
+      const session = {
+        user: data.user,
+        token: data.token,
+        expiresAt: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
+      };
+
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+      setUser(data.user);
+      return { user: data.user };
+    } catch (error) {
+      console.error('Login error:', error);
+      throw error;
     }
-
-    const userData = {
-      email: admin.email,
-      displayName: admin.name,
-      role: 'admin',
-    };
-
-    const session = {
-      user: userData,
-      expiresAt: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
-    };
-
-    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
-    setUser(userData);
-    return { user: userData };
   };
 
   const logout = () => {

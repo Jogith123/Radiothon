@@ -84,7 +84,7 @@ const Header = () => {
                             className="w-8 h-8 rounded-full bg-slate-200 border border-slate-300"
                         />
                         <div className="hidden lg:block text-left">
-                            <p className="text-sm font-bold text-slate-800 dark:text-white leading-none">{user?.displayName || 'Administrator'}</p>
+                            <p className="text-sm font-bold text-slate-800 dark:text-white leading-none">{user?.name || 'Administrator'}</p>
                             <p className="text-xs text-slate-500 dark:text-slate-400 leading-none mt-1">{user?.role || 'Admin'}</p>
                         </div>
                     </div>

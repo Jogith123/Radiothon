@@ -11,6 +11,7 @@ const { initializeTTS, initializeSTT, textToSpeechConvert, transcribeAudio } = r
 const { storeQuestionAndAnswer, getHistoryBySubject, getUserStats, getAllHistory } = require('./services/historyService');
 const { initializeTranslation, detectLanguage, translateText, isTranslationAvailable } = require('./services/translationService');
 const { initializeWebSocket, broadcastCallStarted, broadcastQuestionTranscribed, broadcastAnswerGenerated, broadcastQASaved, broadcastCallEnded, broadcastPipelineStage, closeWebSocket } = require('./services/websocketService');
+const Admin = require('./models/Admin');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -58,6 +59,127 @@ async function initializeServices() {
 
 // Store user sessions (in production, use Redis or database)
 const userSessions = new Map();
+
+// ============================================
+// AUTHENTICATION ENDPOINTS
+// ============================================
+
+/**
+ * Admin Login - Secure authentication endpoint
+ * POST /api/auth/login
+ * Body: { email, password }
+ * Returns: { success, user: { email, name, role }, token }
+ */
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email and password are required',
+      });
+    }
+
+    // Find admin in database
+    const admin = await Admin.findOne({ email: email.toLowerCase().trim() });
+
+    if (!admin) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials',
+      });
+    }
+
+    if (!admin.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: 'Account is inactive',
+      });
+    }
+
+    // Compare passwords
+    const passwordMatch = await admin.comparePassword(password);
+
+    if (!passwordMatch) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials',
+      });
+    }
+
+    // Update last login
+    admin.lastLogin = new Date();
+    await admin.save();
+
+    // Return user data (no password)
+    res.json({
+      success: true,
+      user: {
+        email: admin.email,
+        name: admin.name,
+        role: admin.role,
+      },
+      // In production, generate JWT token here
+      token: Buffer.from(`${admin.email}:${admin._id}`).toString('base64'),
+    });
+  } catch (error) {
+    console.error('Auth error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Authentication failed',
+    });
+  }
+});
+
+/**
+ * Seed default admins (run once)
+ * POST /api/auth/seed
+ */
+app.post('/api/auth/seed', async (req, res) => {
+  try {
+    const existingAdmins = await Admin.countDocuments();
+    if (existingAdmins > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Admins already exist',
+      });
+    }
+
+    const adminAccounts = [
+      {
+        email: 'admin@vidyavani.gov.in',
+        password: 'VidyaVani@2026',
+        name: 'Administrator',
+        role: 'admin',
+      },
+      {
+        email: 'superadmin@vidyavani.gov.in',
+        password: 'SuperAdmin@2026',
+        name: 'Super Admin',
+        role: 'superadmin',
+      },
+    ];
+
+    await Admin.insertMany(adminAccounts);
+
+    res.json({
+      success: true,
+      message: 'Admin accounts created successfully',
+      count: adminAccounts.length,
+    });
+  } catch (error) {
+    console.error('Seed error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to seed admins',
+    });
+  }
+});
+
+// ============================================
+// IVR ENDPOINTS
+// ============================================
 
 // Welcome endpoint - Entry point for incoming calls
 app.post('/ivr/welcome', (req, res) => {

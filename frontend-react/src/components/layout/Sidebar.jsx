@@ -104,7 +104,7 @@ const Sidebar = () => {
                             className="w-8 h-8 rounded-full bg-slate-200 border border-slate-300"
                         />
                         <div className="flex-1 min-w-0">
-                            <p className="text-xs font-bold text-slate-800 dark:text-white truncate">{user?.displayName || 'Admin'}</p>
+                            <p className="text-xs font-bold text-slate-800 dark:text-white truncate">{user?.name || 'Admin'}</p>
                             <p className="text-[10px] text-slate-500 truncate">{user?.email || 'admin@vidyavani.gov.in'}</p>
                         </div>
                     </div>
