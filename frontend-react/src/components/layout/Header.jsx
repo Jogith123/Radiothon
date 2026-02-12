@@ -79,9 +79,10 @@ const Header = () => {
                         className="flex items-center gap-3 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 p-1.5 rounded-lg transition-colors"
                     >
                         <img
-                            src="https://api.dicebear.com/7.x/avataaars/svg?seed=Admin"
+                            src={user?.photoURL || "https://api.dicebear.com/7.x/avataaars/svg?seed=Admin"}
                             alt="User"
                             className="w-8 h-8 rounded-full bg-slate-200 border border-slate-300"
+                            referrerPolicy="no-referrer"
                         />
                         <div className="hidden lg:block text-left">
                             <p className="text-sm font-bold text-slate-800 dark:text-white leading-none">{user?.name || 'Administrator'}</p>

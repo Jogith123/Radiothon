@@ -99,9 +99,10 @@ const Sidebar = () => {
                 <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-4">
                     <div className="flex items-center gap-3 mb-3">
                         <img
-                            src="https://api.dicebear.com/7.x/avataaars/svg?seed=Admin"
+                            src={user?.photoURL || "https://api.dicebear.com/7.x/avataaars/svg?seed=Admin"}
                             alt="Admin"
                             className="w-8 h-8 rounded-full bg-slate-200 border border-slate-300"
+                            referrerPolicy="no-referrer"
                         />
                         <div className="flex-1 min-w-0">
                             <p className="text-xs font-bold text-slate-800 dark:text-white truncate">{user?.name || 'Admin'}</p>

@@ -1,11 +1,10 @@
 /**
  * Firebase Configuration
- * Initializes Firebase app, Auth, and Firestore.
+ * Initializes Firebase app, Auth, and Google provider.
  */
 
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -19,5 +18,5 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+export const googleProvider = new GoogleAuthProvider();
 export default app;

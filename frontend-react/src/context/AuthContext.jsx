@@ -1,24 +1,13 @@
 /**
  * Auth Context
- * Firebase Auth (email/password) — admin-only.
- * Only the whitelisted admin email can sign in.
- * User profile stored in Firestore /admins collection.
+ * Firebase Google OAuth — any Google user can access.
  */
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import {
-  signInWithEmailAndPassword,
-  onAuthStateChanged,
-  signOut,
-  createUserWithEmailAndPassword,
-} from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { auth, db } from '../lib/firebase';
+import { signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
+import { auth, googleProvider } from '../lib/firebase';
 
 const AuthContext = createContext(null);
-
-// Only this email is allowed to log in
-const ADMIN_EMAIL = 'admin@vidyavani.gov.in';
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
@@ -32,33 +21,15 @@ export const AuthProvider = ({ children }) => {
 
   // Listen to Firebase auth state
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
-        // Only allow the admin email
-        if (firebaseUser.email?.toLowerCase() !== ADMIN_EMAIL) {
-          await signOut(auth);
-          setUser(null);
-          setLoading(false);
-          return;
-        }
-        // Fetch admin profile from Firestore
-        try {
-          const adminDoc = await getDoc(doc(db, 'admins', firebaseUser.uid));
-          const profile = adminDoc.exists() ? adminDoc.data() : {};
-          setUser({
-            uid: firebaseUser.uid,
-            email: firebaseUser.email,
-            name: profile.name || 'Administrator',
-            role: profile.role || 'admin',
-          });
-        } catch {
-          setUser({
-            uid: firebaseUser.uid,
-            email: firebaseUser.email,
-            name: 'Administrator',
-            role: 'admin',
-          });
-        }
+        setUser({
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          name: firebaseUser.displayName || 'User',
+          photoURL: firebaseUser.photoURL,
+          role: 'admin',
+        });
       } else {
         setUser(null);
       }
@@ -67,45 +38,12 @@ export const AuthProvider = ({ children }) => {
     return unsubscribe;
   }, []);
 
-  const login = async (email, password) => {
-    // Block non-admin emails immediately
-    if (email.toLowerCase().trim() !== ADMIN_EMAIL) {
-      throw { code: 'auth/unauthorized', message: 'Access restricted to administrators only.' };
-    }
+  const loginWithGoogle = async () => {
     try {
-      let cred;
-      try {
-        cred = await signInWithEmailAndPassword(auth, email.trim(), password);
-      } catch (signInError) {
-        // Auto-create admin account on very first login attempt
-        if (
-          signInError.code === 'auth/user-not-found' ||
-          signInError.code === 'auth/invalid-credential'
-        ) {
-          try {
-            cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
-          } catch (createError) {
-            // If creation also fails, credentials were wrong for existing account
-            throw { code: 'auth/invalid-credential', message: 'Invalid credentials.' };
-          }
-        } else {
-          throw signInError;
-        }
-      }
-      // Ensure admin profile exists in Firestore
-      const adminRef = doc(db, 'admins', cred.user.uid);
-      const adminDoc = await getDoc(adminRef);
-      if (!adminDoc.exists()) {
-        await setDoc(adminRef, {
-          email: cred.user.email,
-          name: 'Administrator',
-          role: 'admin',
-          createdAt: new Date().toISOString(),
-        });
-      }
-      return { user: cred.user };
+      const result = await signInWithPopup(auth, googleProvider);
+      return { user: result.user };
     } catch (error) {
-      console.error('Login error:', error);
+      console.error('Google login error:', error);
       throw error;
     }
   };
@@ -118,7 +56,7 @@ export const AuthProvider = ({ children }) => {
   const value = {
     user,
     loading,
-    login,
+    loginWithGoogle,
     logout,
     isAuthenticated: !!user,
   };

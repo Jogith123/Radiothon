@@ -1,32 +1,32 @@
 /**
- * Login Page — Admin Only
- * Clean, accessible, official-looking login. No Google auth, no signup.
+ * Login Page — Google OAuth
+ * Clean, official-looking login with Google sign-in.
  */
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { motion } from 'framer-motion';
-import { Eye, EyeOff, LogIn, AlertCircle, Shield, Lock } from 'lucide-react';
+import { AlertCircle, Shield, Lock } from 'lucide-react';
 
 const Login = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const { loginWithGoogle } = useAuth();
   const navigate = useNavigate();
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleGoogleLogin = async () => {
     setError('');
     setLoading(true);
     try {
-      await login(email, password);
+      await loginWithGoogle();
       navigate('/');
     } catch (err) {
-      setError('Invalid admin credentials. Access is restricted to authorized administrators only.');
+      if (err.code === 'auth/popup-closed-by-user') {
+        setError('Sign-in popup was closed. Please try again.');
+      } else {
+        setError('Authentication failed. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -74,8 +74,8 @@ const Login = () => {
                   <Lock size={20} className="text-white" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-white">Admin Login</h2>
-                  <p className="text-[#c4b5fd] text-sm mt-0.5">Authorized personnel only</p>
+                  <h2 className="text-xl font-bold text-white">Welcome</h2>
+                  <p className="text-[#c4b5fd] text-sm mt-0.5">Sign in to access the dashboard</p>
                 </div>
               </div>
             </div>
@@ -92,65 +92,36 @@ const Login = () => {
                 </motion.div>
               )}
 
-              <form onSubmit={handleSubmit} className="space-y-5">
-                <div>
-                  <label className="block text-sm font-semibold text-[#374151] mb-1.5">
-                    Admin Email
-                  </label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    placeholder="admin@vidyavani.gov.in"
-                    className="w-full px-4 py-3 rounded-xl border border-[#d1d5db] bg-[#f9fafb] text-[#111827] text-sm focus:ring-2 focus:ring-[#6d28d9]/40 focus:border-[#6d28d9] outline-none transition-all placeholder:text-[#9ca3af]"
-                  />
-                </div>
+              <div className="text-center mb-6">
+                <p className="text-sm text-[#6b7280]">
+                  Sign in with your Google account to access the VidyaVani admin dashboard.
+                </p>
+              </div>
 
-                <div>
-                  <label className="block text-sm font-semibold text-[#374151] mb-1.5">
-                    Password
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      required
-                      placeholder="Enter admin password"
-                      className="w-full px-4 py-3 rounded-xl border border-[#d1d5db] bg-[#f9fafb] text-[#111827] text-sm focus:ring-2 focus:ring-[#6d28d9]/40 focus:border-[#6d28d9] outline-none transition-all pr-12 placeholder:text-[#9ca3af]"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6b7280] hover:text-[#6d28d9] transition-colors"
-                    >
-                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full flex items-center justify-center gap-2 bg-[#6d28d9] hover:bg-[#5b21b6] text-white font-semibold py-3 px-4 rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-[#6d28d9]/25"
-                >
-                  {loading ? (
-                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  ) : (
-                    <>
-                      <LogIn size={18} />
-                      Sign In
-                    </>
-                  )}
-                </button>
-              </form>
+              <button
+                onClick={handleGoogleLogin}
+                disabled={loading}
+                className="w-full flex items-center justify-center gap-3 bg-white hover:bg-[#f9fafb] text-[#374151] font-semibold py-3.5 px-4 rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed border-2 border-[#e5e7eb] hover:border-[#d1d5db] shadow-sm hover:shadow-md"
+              >
+                {loading ? (
+                  <div className="w-5 h-5 border-2 border-[#6d28d9]/30 border-t-[#6d28d9] rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" />
+                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                    </svg>
+                    Continue with Google
+                  </>
+                )}
+              </button>
 
               <div className="mt-6 p-4 bg-[#f5f3ff] rounded-xl border border-[#e9e5ff]">
-                <p className="text-xs text-[#6d28d9] font-semibold mb-1">Restricted Access</p>
+                <p className="text-xs text-[#6d28d9] font-semibold mb-1">VidyaVani Dashboard</p>
                 <p className="text-xs text-[#6b7280]">
-                  This portal is restricted to authorized VidyaVani administrators. 
-                  Contact your system administrator if you need access.
+                  Access real-time call analytics, AI-powered insights, and content management tools for the VidyaVani Radiothon platform.
                 </p>
               </div>
             </div>
@@ -158,7 +129,7 @@ const Login = () => {
 
           {/* Footer notice */}
           <p className="text-center text-xs text-[#9ca3af] mt-6">
-            Protected by Government cybersecurity standards. Unauthorized access is prohibited.
+            Protected by Government cybersecurity standards.
           </p>
         </motion.div>
       </div>
