@@ -8,6 +8,7 @@ const VoiceResponse = require('twilio').twiml.VoiceResponse;
 // Import modular services
 const { connectToMongoDB, closeConnection, isConnected } = require('./database/connection');
 const { initializeOpenAI, isInitialized: isOpenAIInitialized, generateAnswer, generateSummary } = require('./services/openaiService');
+const aiProviderService = require('./services/aiProviderService');
 const { initializeTTS, initializeSTT, textToSpeechConvert, transcribeAudio } = require('./services/speechService');
 const { storeQuestionAndAnswer, getHistoryBySubject, getUserStats, getAllHistory } = require('./services/historyService');
 const { initializeTranslation, detectLanguage, translateText, isTranslationAvailable } = require('./services/translationService');
@@ -39,7 +40,10 @@ const server = http.createServer(app);
 async function initializeServices() {
   console.log('🚀 Initializing Vidya Vani services...\n');
 
-  // Initialize OpenAI
+  // Initialize AI Provider (auto-detects Gemini or OpenAI)
+  await aiProviderService.initializeAIProvider();
+
+  // Also try OpenAI directly (for legacy endpoints)
   initializeOpenAI();
 
   // Initialize Google TTS
@@ -395,17 +399,17 @@ async function getAnswer(callSid, req) {
   }
 
   try {
-    // Check if OpenAI is available
-    if (!isOpenAIInitialized()) {
+    // Check if any AI provider is available
+    if (!aiProviderService.isAnyProviderInitialized()) {
       twiml.say(
-        'Sorry, AI service is not configured. Please add your OpenAI API key to the environment file.',
+        'Sorry, AI service is not configured. Please contact the administrator.',
         { voice: 'Polly.Joanna', language: 'en-US' }
       );
       twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
       return twiml.toString();
     }
 
-    // Get answer from OpenAI (in English)
+    // Get answer from AI provider (in English)
     let answer = '';
 
     // Get the question from session
@@ -416,8 +420,8 @@ async function getAnswer(callSid, req) {
       { voice: 'Polly.Joanna', language: 'en-US' }
     );
 
-    console.log(`🤖 Sending to OpenAI: ${question}`);
-    const answerEnglish = await generateAnswer(question);
+    console.log(`🤖 Sending to AI (${aiProviderService.getActiveProvider()}): ${question}`);
+    const answerEnglish = await aiProviderService.generateAnswer(question);
 
     console.log(`🤖 Answer (English): ${answerEnglish}`);
 
@@ -531,10 +535,10 @@ async function getSummary(callSid, req) {
       return twiml.toString();
     }
 
-    // Check if OpenAI is available
-    if (!isOpenAIInitialized()) {
+    // Check if any AI provider is available
+    if (!aiProviderService.isAnyProviderInitialized()) {
       twiml.say(
-        'Sorry, AI service is not configured. Please add your OpenAI API key to the environment file.',
+        'Sorry, AI service is not configured. Please contact the administrator.',
         { voice: 'Polly.Joanna', language: 'en-US' }
       );
       twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
@@ -669,9 +673,9 @@ app.post('/ivr/process-summary', async (req, res) => {
       return;
     }
 
-    // Generate summary using OpenAI
+    // Generate summary using AI provider
     console.log(`🤖 Generating summary for ${subjectName} with ${history.length} questions...`);
-    const summary = await generateSummary(subjectName, history);
+    const summary = await aiProviderService.generateSummary(subjectName, history);
     console.log(`📊 Summary generated successfully`);
 
     // Convert summary to speech
@@ -1009,6 +1013,7 @@ app.get('/health', (req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     services: {
+      ai: aiProviderService.getActiveProvider(),
       openai: isOpenAIInitialized(),
       mongodb: isConnected()
     }
@@ -1040,6 +1045,7 @@ app.get('/api/status', async (req, res) => {
       activeSessions: activeCalls.length,
       callsToday,
       mongodb: isConnected(),
+      ai: aiProviderService.getActiveProvider(),
       openai: isOpenAIInitialized()
     });
   } catch (error) {
@@ -1050,6 +1056,7 @@ app.get('/api/status', async (req, res) => {
       activeSessions: userSessions.size,
       callsToday: 0,
       mongodb: isConnected(),
+      ai: aiProviderService.getActiveProvider(),
       openai: isOpenAIInitialized()
     });
   }
@@ -1334,26 +1341,36 @@ app.post('/api/rag/generate-answer', async (req, res) => {
     const searchResult = await ragService.searchDocuments(query, 3, 0.1);
     const context = searchResult.results.map(r => r.content).join('\n\n');
 
-    // Use Gemini to generate answer with context
-    const { generateAnswer } = require('./services/openaiService');
+    // Use AI provider (Gemini or OpenAI) to generate answer
     let answer;
-    if (context.length > 0) {
-      answer = await generateAnswer(
-        `Using the following reference material:\n\n${context}\n\nAnswer this question: ${query}`
-      );
-    } else {
-      answer = await generateAnswer(query);
+    try {
+      if (context.length > 0) {
+        answer = await aiProviderService.generateAnswer(
+          `Using the following reference material:\n\n${context}\n\nAnswer this question: ${query}`
+        );
+      } else {
+        answer = await aiProviderService.generateAnswer(query);
+      }
+    } catch (aiError) {
+      console.warn('AI generation failed, returning context only:', aiError.message);
+      answer = context.length > 0 
+        ? `Based on the knowledge base: ${context.substring(0, 500)}` 
+        : 'No AI provider available and no relevant documents found.';
     }
 
     res.json({
       success: true,
       query,
       answer: answer || 'Unable to generate answer',
+      augmentedContext: context.length > 0 ? context : null,
       sources: searchResult.results.map(r => ({
         fileName: r.fileName,
         subject: r.subject,
-        similarity: r.similarity
+        chapterTitle: r.chapterTitle || 'General',
+        relevanceScore: r.score || r.similarity,
+        similarity: r.score || r.similarity
       })),
+      sourcesCount: searchResult.results.length,
       hasContext: context.length > 0
     });
   } catch (error) {

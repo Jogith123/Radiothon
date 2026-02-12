@@ -199,17 +199,18 @@ export async function batchUploadDocuments(files, subject = 'General') {
 export async function getLibraryStats() {
   try {
     const library = await getContentLibrary();
+    const docs = library.documents || [];
     const stats = {
       totalDocuments: library.count,
-      totalChunks: library.documents.reduce((sum, doc) => sum + doc.chunks.length, 0),
-      subjects: [...new Set(library.documents.map(doc => doc.subject))],
-      fileTypes: [...new Set(library.documents.map(doc => doc.fileType))],
-      totalSize: library.documents.reduce((sum, doc) => sum + doc.content.length, 0),
-      documents: library.documents.map(doc => ({
+      totalChunks: docs.reduce((sum, doc) => sum + (doc.totalChunks || 0), 0),
+      subjects: [...new Set(docs.map(doc => doc.subject))],
+      fileTypes: [...new Set(docs.map(doc => doc.fileType))],
+      totalSize: docs.reduce((sum, doc) => sum + (doc.contentLength || 0), 0),
+      documents: docs.map(doc => ({
         id: doc._id,
         name: doc.fileName,
         subject: doc.subject,
-        chunks: doc.chunks.length,
+        chunks: doc.totalChunks || 0,
         uploadedAt: doc.uploadedAt
       }))
     };

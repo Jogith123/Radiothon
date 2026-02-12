@@ -310,7 +310,7 @@ const ContentLibrary = () => {
                     <div style={styles.statLabel}>Documents</div>
                   </Card>
                   <Card style={styles.statCard}>
-                    <div style={styles.statIcon}>�</div>
+                    <div style={styles.statIcon}>{"\ud83d\udcd6"}</div>
                     <div style={styles.statValue}>{stats.totalChapters || 0}</div>
                     <div style={styles.statLabel}>Chapters</div>
                   </Card>
