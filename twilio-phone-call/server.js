@@ -1214,6 +1214,155 @@ app.get('/api/analytics/performance', async (req, res) => {
 });
 
 // ========================================
+// RAG Content Library API
+// ========================================
+const multer = require('multer');
+const ragService = require('./services/ragService');
+
+// Configure multer for file uploads (memory storage for processing)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (req, file, cb) => {
+    const allowed = ['.txt', '.pdf', '.docx', '.md', '.csv'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowed.includes(ext)) cb(null, true);
+    else cb(new Error(`Unsupported file type: ${ext}`));
+  }
+});
+
+/**
+ * GET /api/rag/library - List all documents
+ */
+app.get('/api/rag/library', async (req, res) => {
+  try {
+    const data = await ragService.getLibrary();
+    res.json(data);
+  } catch (error) {
+    console.error('RAG library error:', error.message);
+    res.json({ success: true, count: 0, documents: [] });
+  }
+});
+
+/**
+ * POST /api/rag/upload - Upload a document
+ */
+app.post('/api/rag/upload', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, error: 'No file provided' });
+
+    const content = req.file.buffer.toString('utf-8');
+    const subject = req.body.subject || 'General';
+    const fileName = req.file.originalname;
+    const ext = path.extname(fileName).toLowerCase().replace('.', '');
+
+    const result = await ragService.uploadDocument(fileName, content, subject, ext);
+    res.json(result);
+  } catch (error) {
+    console.error('RAG upload error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /api/rag/search - Search documents
+ */
+app.post('/api/rag/search', async (req, res) => {
+  try {
+    const { query, topK = 5, minSimilarity = 0.2 } = req.body;
+    if (!query) return res.status(400).json({ success: false, error: 'Query required' });
+
+    const results = await ragService.searchDocuments(query, topK, minSimilarity);
+    res.json(results);
+  } catch (error) {
+    console.error('RAG search error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * DELETE /api/rag/content/:docId - Delete a document
+ */
+app.delete('/api/rag/content/:docId', async (req, res) => {
+  try {
+    const result = await ragService.deleteDocument(req.params.docId);
+    res.json(result);
+  } catch (error) {
+    console.error('RAG delete error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /api/rag/clear - Clear entire library
+ */
+app.post('/api/rag/clear', async (req, res) => {
+  try {
+    const result = await ragService.clearLibrary();
+    res.json(result);
+  } catch (error) {
+    console.error('RAG clear error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /api/rag/validate-response - Validate response quality
+ */
+app.post('/api/rag/validate-response', async (req, res) => {
+  try {
+    const { response, threshold = 0.6 } = req.body;
+    if (!response) return res.status(400).json({ success: false, error: 'Response text required' });
+
+    const result = ragService.validateResponse(response, threshold);
+    res.json(result);
+  } catch (error) {
+    console.error('RAG validate error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /api/rag/generate-answer - Generate RAG-enhanced answer using Gemini
+ */
+app.post('/api/rag/generate-answer', async (req, res) => {
+  try {
+    const { query } = req.body;
+    if (!query) return res.status(400).json({ success: false, error: 'Query required' });
+
+    // Search for relevant context
+    const searchResult = await ragService.searchDocuments(query, 3, 0.1);
+    const context = searchResult.results.map(r => r.content).join('\n\n');
+
+    // Use Gemini to generate answer with context
+    const { generateAnswer } = require('./services/openaiService');
+    let answer;
+    if (context.length > 0) {
+      answer = await generateAnswer(
+        `Using the following reference material:\n\n${context}\n\nAnswer this question: ${query}`
+      );
+    } else {
+      answer = await generateAnswer(query);
+    }
+
+    res.json({
+      success: true,
+      query,
+      answer: answer || 'Unable to generate answer',
+      sources: searchResult.results.map(r => ({
+        fileName: r.fileName,
+        subject: r.subject,
+        similarity: r.similarity
+      })),
+      hasContext: context.length > 0
+    });
+  } catch (error) {
+    console.error('RAG generate error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ========================================
 // Exotel Integration
 // ========================================
 
