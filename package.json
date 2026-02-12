@@ -1,0 +1,11 @@
+{
+  "name": "vidyavani-radiothon",
+  "private": true,
+  "scripts": {
+    "preinstall": "cd twilio-phone-call && npm install",
+    "start": "cd twilio-phone-call && node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
