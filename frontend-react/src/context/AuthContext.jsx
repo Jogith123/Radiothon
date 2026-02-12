@@ -1,14 +1,24 @@
 /**
  * Auth Context
- * Secure admin-only authentication via backend API.
- * Credentials stored in MongoDB, never exposed to frontend.
+ * Firebase Auth (email/password) — admin-only.
+ * Only the whitelisted admin email can sign in.
+ * User profile stored in Firestore /admins collection.
  */
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import {
+  signInWithEmailAndPassword,
+  onAuthStateChanged,
+  signOut,
+  createUserWithEmailAndPassword,
+} from 'firebase/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
 
 const AuthContext = createContext(null);
 
-const AUTH_STORAGE_KEY = 'vidyavani_admin_session';
+// Only this email is allowed to log in
+const ADMIN_EMAIL = 'admin@vidyavani.gov.in';
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
@@ -20,69 +30,88 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Get backend URL from environment
-  const getBackendUrl = () => {
-    return import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-  };
-
-  // Check for existing session on mount
+  // Listen to Firebase auth state
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(AUTH_STORAGE_KEY);
-      if (stored) {
-        const session = JSON.parse(stored);
-        // Validate session hasn't expired (24 hour expiry)
-        if (session.expiresAt && Date.now() < session.expiresAt) {
-          setUser(session.user);
-        } else {
-          localStorage.removeItem(AUTH_STORAGE_KEY);
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        // Only allow the admin email
+        if (firebaseUser.email?.toLowerCase() !== ADMIN_EMAIL) {
+          await signOut(auth);
+          setUser(null);
+          setLoading(false);
+          return;
         }
+        // Fetch admin profile from Firestore
+        try {
+          const adminDoc = await getDoc(doc(db, 'admins', firebaseUser.uid));
+          const profile = adminDoc.exists() ? adminDoc.data() : {};
+          setUser({
+            uid: firebaseUser.uid,
+            email: firebaseUser.email,
+            name: profile.name || 'Administrator',
+            role: profile.role || 'admin',
+          });
+        } catch {
+          setUser({
+            uid: firebaseUser.uid,
+            email: firebaseUser.email,
+            name: 'Administrator',
+            role: 'admin',
+          });
+        }
+      } else {
+        setUser(null);
       }
-    } catch (error) {
-      console.error('Session restore error:', error);
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-    }
-    setLoading(false);
+      setLoading(false);
+    });
+    return unsubscribe;
   }, []);
 
   const login = async (email, password) => {
+    // Block non-admin emails immediately
+    if (email.toLowerCase().trim() !== ADMIN_EMAIL) {
+      throw { code: 'auth/unauthorized', message: 'Access restricted to administrators only.' };
+    }
     try {
-      const backendUrl = getBackendUrl();
-      const response = await fetch(`${backendUrl}/api/auth/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        throw {
-          code: 'auth/invalid-credential',
-          message: data.message || 'Login failed',
-        };
+      let cred;
+      try {
+        cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+      } catch (signInError) {
+        // Auto-create admin account on very first login attempt
+        if (
+          signInError.code === 'auth/user-not-found' ||
+          signInError.code === 'auth/invalid-credential'
+        ) {
+          try {
+            cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
+          } catch (createError) {
+            // If creation also fails, credentials were wrong for existing account
+            throw { code: 'auth/invalid-credential', message: 'Invalid credentials.' };
+          }
+        } else {
+          throw signInError;
+        }
       }
-
-      // Store session
-      const session = {
-        user: data.user,
-        token: data.token,
-        expiresAt: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
-      };
-
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
-      setUser(data.user);
-      return { user: data.user };
+      // Ensure admin profile exists in Firestore
+      const adminRef = doc(db, 'admins', cred.user.uid);
+      const adminDoc = await getDoc(adminRef);
+      if (!adminDoc.exists()) {
+        await setDoc(adminRef, {
+          email: cred.user.email,
+          name: 'Administrator',
+          role: 'admin',
+          createdAt: new Date().toISOString(),
+        });
+      }
+      return { user: cred.user };
     } catch (error) {
       console.error('Login error:', error);
       throw error;
     }
   };
 
-  const logout = () => {
-    localStorage.removeItem(AUTH_STORAGE_KEY);
+  const logout = async () => {
+    await signOut(auth);
     setUser(null);
   };
 
