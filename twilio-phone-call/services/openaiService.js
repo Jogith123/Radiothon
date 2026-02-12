@@ -22,7 +22,7 @@ function initializeOpenAI() {
             console.log(`✅ OpenAI initialized (using ${model})`);
             return true;
         } else {
-            console.log('⚠️  OPENAI_API_KEY not found in .env');
+            console.log('ℹ️  OPENAI_API_KEY not set (using Gemini as AI provider)');
             return false;
         }
     } catch (error) {

@@ -20,7 +20,7 @@ function initializeTranslation() {
             console.log('✅ Google Cloud Translation initialized');
             return true;
         } else {
-            console.log('⚠️  Translation credentials not found');
+            console.log('ℹ️  Translation not configured - English-only mode (OK)');
             return false;
         }
     } catch (error) {

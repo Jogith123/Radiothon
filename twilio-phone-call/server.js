@@ -42,17 +42,15 @@ async function initializeServices() {
 
   // Initialize AI Provider (auto-detects Gemini or OpenAI)
   await aiProviderService.initializeAIProvider();
+  console.log(`✅ Active AI Provider: ${aiProviderService.getActiveProvider()}`);
 
-  // Also try OpenAI directly (for legacy endpoints)
-  initializeOpenAI();
-
-  // Initialize Google TTS
+  // Initialize Google TTS (optional - falls back to Twilio)
   initializeTTS();
 
-  // Initialize Google STT
+  // Initialize Google STT (optional - falls back to Twilio)
   initializeSTT();
 
-  // Initialize Google Translation
+  // Initialize Google Translation (optional)
   initializeTranslation();
 
   // Initialize MongoDB

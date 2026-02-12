@@ -25,11 +25,11 @@ function initializeTTS() {
       console.log('✅ Google TTS initialized');
       return true;
     } else {
-      console.log('⚠️  Google TTS credentials not found - using Twilio TTS fallback');
+      console.log('ℹ️  Google TTS not configured - using Twilio TTS (OK)');
       return false;
     }
   } catch (error) {
-    console.log('⚠️  Google TTS initialization failed - using Twilio TTS fallback');
+    console.log('ℹ️  Google TTS unavailable - using Twilio TTS fallback');
     ttsClient = null;
     return false;
   }
@@ -47,11 +47,11 @@ function initializeSTT() {
       console.log('✅ Google Speech-to-Text initialized');
       return true;
     } else {
-      console.log('⚠️  Google STT credentials not found - using Twilio transcription fallback');
+      console.log('ℹ️  Google STT not configured - using Twilio transcription (OK)');
       return false;
     }
   } catch (error) {
-    console.log('⚠️  Google STT initialization failed - using Twilio transcription fallback');
+    console.log('ℹ️  Google STT unavailable - using Twilio transcription fallback');
     sttClient = null;
     return false;
   }
