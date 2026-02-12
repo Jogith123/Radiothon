@@ -1,6 +1,6 @@
 /**
  * App Entry Point
- * Main app with routing, context providers, and route transitions.
+ * Main app with routing, auth protection, context providers, and route transitions.
  */
 
 import React from 'react';
@@ -14,9 +14,14 @@ import Dashboard from './pages/Dashboard';
 import LiveCalls from './pages/LiveCalls';
 import Analytics from './pages/Analytics';
 import CallHistory from './pages/CallHistory';
-import PlaceholderPage from './pages/PlaceholderPage';
+import ContentLibrary from './pages/ContentLibrary';
+import Login from './pages/Login';
+
+// Auth
+import ProtectedRoute from './components/auth/ProtectedRoute';
 
 // Context Providers
+import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { WebSocketProvider } from './context/WebSocketContext';
 
@@ -30,22 +35,28 @@ const queryClient = new QueryClient({
 });
 
 /**
- * Animated routes wrapper for page transitions
+ * Protected dashboard routes — only accessible after admin login
  */
-const AnimatedRoutes = () => {
+const ProtectedRoutes = () => {
   const location = useLocation();
 
   return (
-    <AnimatePresence mode="wait">
-      <Routes location={location} key={location.pathname}>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/calls" element={<LiveCalls />} />
-        <Route path="/analytics" element={<Analytics />} />
-        <Route path="/history" element={<CallHistory />} />
-        <Route path="/content" element={<PlaceholderPage title="Content Library" />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </AnimatePresence>
+    <ProtectedRoute>
+      <WebSocketProvider>
+        <DashboardLayout>
+          <AnimatePresence mode="wait">
+            <Routes location={location} key={location.pathname}>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/calls" element={<LiveCalls />} />
+              <Route path="/analytics" element={<Analytics />} />
+              <Route path="/history" element={<CallHistory />} />
+              <Route path="/content" element={<ContentLibrary />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </AnimatePresence>
+        </DashboardLayout>
+      </WebSocketProvider>
+    </ProtectedRoute>
   );
 };
 
@@ -53,13 +64,14 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <ThemeProvider>
-          <WebSocketProvider>
-            <DashboardLayout>
-              <AnimatedRoutes />
-            </DashboardLayout>
-          </WebSocketProvider>
-        </ThemeProvider>
+        <AuthProvider>
+          <ThemeProvider>
+            <Routes>
+              <Route path="/login" element={<Login />} />
+              <Route path="/*" element={<ProtectedRoutes />} />
+            </Routes>
+          </ThemeProvider>
+        </AuthProvider>
       </BrowserRouter>
     </QueryClientProvider>
   );

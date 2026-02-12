@@ -33,7 +33,7 @@ export const WebSocketProvider = ({ children }) => {
     const connect = useCallback(() => {
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         // const wsUrl = `${wsProtocol}//${window.location.hostname}:5050`;
-        const wsUrl = `ws://localhost:5050`; // Hardcoded for local dev if needed, or derived
+        const wsUrl = import.meta.env.VITE_WS_URL || `ws://localhost:5050`;
 
         console.log('Connecting to WS:', wsUrl);
 

@@ -1,4 +1,4 @@
-const BASE_URL = 'http://localhost:3000';
+const BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
 
 export const apiClient = async (endpoint, { method = 'GET', body, ...customConfig } = {}) => {
     const headers = { 'Content-Type': 'application/json' };

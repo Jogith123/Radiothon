@@ -1,12 +1,20 @@
 import React from 'react';
-import { Bell, Search, Sun, Moon, Database } from 'lucide-react';
+import { Bell, Search, Sun, Moon, LogOut } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
-import { useLocation } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
+import { useLocation, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 
 const Header = () => {
     const { theme, toggleTheme } = useTheme();
+    const { user, logout } = useAuth();
     const location = useLocation();
+    const navigate = useNavigate();
+
+    const handleLogout = () => {
+        logout();
+        navigate('/login');
+    };
 
     // Dynamic page title based on current route
     const getPageTitle = () => {
@@ -68,7 +76,6 @@ const Header = () => {
                     <div className="h-8 w-px bg-slate-200 dark:bg-slate-700 mx-1"></div>
 
                     <div
-                        onClick={() => handleFeatureClick('User Profile')}
                         className="flex items-center gap-3 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 p-1.5 rounded-lg transition-colors"
                     >
                         <img
@@ -77,10 +84,18 @@ const Header = () => {
                             className="w-8 h-8 rounded-full bg-slate-200 border border-slate-300"
                         />
                         <div className="hidden lg:block text-left">
-                            <p className="text-sm font-bold text-slate-800 dark:text-white leading-none">Administrator</p>
-                            <p className="text-xs text-slate-500 dark:text-slate-400 leading-none mt-1">Super Admin</p>
+                            <p className="text-sm font-bold text-slate-800 dark:text-white leading-none">{user?.displayName || 'Administrator'}</p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 leading-none mt-1">{user?.role || 'Admin'}</p>
                         </div>
                     </div>
+
+                    <button
+                        onClick={handleLogout}
+                        className="p-2 rounded-full text-slate-500 hover:bg-red-50 hover:text-red-600 dark:text-slate-400 dark:hover:bg-red-900/20 dark:hover:text-red-400 transition-colors"
+                        title="Sign Out"
+                    >
+                        <LogOut size={20} />
+                    </button>
                 </div>
             </div>
         </header>
