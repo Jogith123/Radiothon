@@ -21,6 +21,10 @@ function getGoogleCredentials() {
   if (process.env.GOOGLE_CREDENTIALS) {
     try {
       const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+      // Fix private_key newlines - Railway may store literal \n instead of actual newlines
+      if (credentials.private_key) {
+        credentials.private_key = credentials.private_key.replace(/\\n/g, '\n');
+      }
       return { credentials };
     } catch (e) {
       console.log('⚠️  GOOGLE_CREDENTIALS env var is not valid JSON');
@@ -189,6 +193,33 @@ async function transcribeAudio(recordingUrl, callSid, languageCode = 'te-IN') {
 
     // Use Google Speech-to-Text if available
     if (sttClient) {
+      // If a specific language was selected by the user, use ONLY that language
+      // No need to try all 4 languages when we already know what the user chose
+      const useDirectLanguage = languageCode && languageCode !== 'auto';
+
+      if (useDirectLanguage) {
+        console.log(`🔊 Using Google Speech-to-Text for ${callSid} in ${languageCode} (user-selected)`);
+
+        const request = {
+          audio: { content: audioBuffer.toString('base64') },
+          config: {
+            encoding: 'LINEAR16',
+            sampleRateHertz: 8000,
+            languageCode: languageCode,
+            enableAutomaticPunctuation: true
+          }
+        };
+
+        const [response] = await sttClient.recognize(request);
+
+        if (response.results && response.results.length > 0) {
+          transcriptionText = response.results[0].alternatives[0].transcript;
+          detectedLanguage = languageCode;
+          console.log(`📝 Transcription (${languageCode}): "${transcriptionText}"`);
+        } else {
+          throw new Error(`No transcription results for language ${languageCode}`);
+        }
+      } else {
       console.log(`🔊 Using Google Speech-to-Text for ${callSid} with auto-detection`);
 
       // Supported languages for multi-language detection
@@ -280,6 +311,7 @@ async function transcribeAudio(recordingUrl, callSid, languageCode = 'te-IN') {
 
       console.log(`📝 Final transcription: "${transcriptionText}"`);
       console.log(`🌐 Detected language: ${detectedLanguage}`);
+      } // end auto-detection else block
     } else {
       console.log(`⚠️ Google STT not available`);
       throw new Error('STT not available');
@@ -305,6 +337,10 @@ function cleanupOldAudioFiles(audioDir) {
     const oneHourAgo = Date.now() - (60 * 60 * 1000);
 
     files.forEach(file => {
+      // ONLY delete dynamically generated answer/response audio files
+      // NEVER delete pre-generated IVR audio files (menu, welcome, prompts, etc.)
+      if (!file.startsWith('answer_')) return;
+
       const filePath = path.join(audioDir, file);
       const stats = fs.statSync(filePath);
       if (stats.mtimeMs < oneHourAgo) {

@@ -16,6 +16,10 @@ function getGoogleCredentials() {
     if (process.env.GOOGLE_CREDENTIALS) {
         try {
             const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+            // Fix private_key newlines - Railway may store literal \n instead of actual newlines
+            if (credentials.private_key) {
+                credentials.private_key = credentials.private_key.replace(/\\n/g, '\n');
+            }
             return { credentials };
         } catch (e) {
             console.log('⚠️  GOOGLE_CREDENTIALS env var is not valid JSON');

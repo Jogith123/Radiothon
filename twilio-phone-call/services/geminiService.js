@@ -137,11 +137,49 @@ Give a short and simple summary of what the user has learned so far in ${subject
   return response.text();
 }
 
+/**
+ * Explain a specific chapter from a book/document
+ * Sends the FULL document content to the LLM and asks it to explain the requested chapter
+ * @param {string} chapterRequest - What the user asked (e.g., "explain chapter 3 of physics")
+ * @param {string} fullContent - The entire document content from RAG
+ * @param {string} fileName - The document filename for context
+ * @returns {Promise<string>} AI-generated chapter explanation
+ */
+async function explainChapter(chapterRequest, fullContent, fileName) {
+  if (!model) {
+    throw new Error('Gemini AI not initialized');
+  }
+
+  const prompt = `You are an educational assistant. The user wants you to explain a specific chapter or topic from their study material.
+
+User's request: "${chapterRequest}"
+
+Here is the FULL content of the document "${fileName}":
+---
+${fullContent}
+---
+
+Instructions:
+1. Identify which chapter or section the user is referring to from the document above.
+2. Provide a clear, detailed explanation of that chapter's content.
+3. Break it down in a way that's easy to understand for a student.
+4. Keep the explanation suitable for voice response (clear, conversational, well-structured).
+5. If you cannot find the exact chapter, explain the closest matching section.
+6. Keep the explanation under 500 words so it's not too long for voice playback.
+
+Explain:`;
+
+  const result = await model.generateContent(prompt);
+  const response = await result.response;
+  return response.text();
+}
+
 module.exports = {
   initializeGemini,
   isInitialized,
   getModel,
   generateAnswer,
   classifySubject,
-  generateSummary
+  generateSummary,
+  explainChapter
 };

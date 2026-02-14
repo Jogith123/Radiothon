@@ -88,7 +88,14 @@ function addMultilingualPrompt(twimlObject, promptKey, langCode, options = {}) {
     'invalidOption': langCode === 'te-IN' ? 'invalid_option_telugu' : 'invalid_option_tamil',
     'aiServiceError': langCode === 'te-IN' ? 'ai_error_telugu' : 'ai_error_tamil',
     'databaseError': langCode === 'te-IN' ? 'db_error_telugu' : 'db_error_tamil',
-    'generalError': langCode === 'te-IN' ? 'general_error_telugu' : 'general_error_tamil'
+    'generalError': langCode === 'te-IN' ? 'general_error_telugu' : 'general_error_tamil',
+    'chapterExplainPrompt': langCode === 'te-IN' ? 'chapter_explain_telugu' : 'chapter_explain_tamil',
+    'chapterProcessing': langCode === 'te-IN' ? 'chapter_processing_telugu' : 'chapter_processing_tamil',
+    'chapterRecorded': langCode === 'te-IN' ? 'chapter_recorded_telugu' : 'chapter_recorded_tamil',
+    'noDocumentsUploaded': langCode === 'te-IN' ? 'no_documents_telugu' : 'no_documents_tamil',
+    'pausedExplanation': langCode === 'te-IN' ? 'paused_explanation_telugu' : 'paused_explanation_tamil',
+    'continueExplanation': langCode === 'te-IN' ? 'continue_explanation_telugu' : 'continue_explanation_tamil',
+    'afterChapterExplain': langCode === 'te-IN' ? 'after_chapter_telugu' : 'after_chapter_tamil'
   };
 
   if (langCode === 'te-IN' || langCode === 'ta-IN') {
@@ -244,6 +251,8 @@ app.post('/ivr/menu', async (req, res) => {
     '4': getSummary,
     '5': returnToMenu,
     '6': followUpQuestion,
+    '7': chapterExplain,
+    '8': pauseExplanation,
     '9': endCall
   };
 
@@ -907,6 +916,256 @@ app.post('/ivr/followup-recorded', async (req, res) => {
   res.send(twiml.toString());
 });
 
+// ============================================
+// CHAPTER EXPLAIN FLOW (Option 7)
+// ============================================
+
+// Chapter explain - user says which chapter to explain
+async function chapterExplain(callSid, req) {
+  console.log(`📖 Chapter explain requested for call: ${callSid}`);
+  const session = userSessions.get(callSid) || {};
+  const selectedLangCode = session.selectedLanguage || 'en-US';
+  const voiceConfig = getVoiceConfig(selectedLangCode);
+
+  const twiml = new VoiceResponse();
+
+  // Check if there's a paused explanation to continue
+  if (session.pausedExplanationAudio) {
+    console.log(`▶️ Resuming paused explanation for call: ${callSid}`);
+    addMultilingualPrompt(twiml, 'continueExplanation', selectedLangCode);
+
+    // Play the stored explanation audio with gather for pause (press 8)
+    const gather = twiml.gather({
+      action: `${process.env.BASE_URL}/ivr/menu`,
+      numDigits: '1',
+      method: 'POST',
+      input: 'dtmf'
+    });
+
+    const audioUrl = session.pausedExplanationAudio;
+    gather.play(audioUrl);
+
+    // After audio finishes, offer options
+    const gather2 = twiml.gather({
+      action: `${process.env.BASE_URL}/ivr/menu`,
+      numDigits: '1',
+      method: 'POST',
+      timeout: 10
+    });
+    addMultilingualPrompt(gather2, 'afterChapterExplain', selectedLangCode, { loop: 2 });
+
+    // Clear the paused state
+    session.pausedExplanationAudio = null;
+    userSessions.set(callSid, session);
+
+    return twiml.toString();
+  }
+
+  // Check if RAG documents exist
+  try {
+    const { getLibrary } = require('./services/ragService');
+    const library = await getLibrary();
+
+    if (!library.documents || library.documents.length === 0) {
+      addMultilingualPrompt(twiml, 'noDocumentsUploaded', selectedLangCode);
+      twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
+      return twiml.toString();
+    }
+  } catch (error) {
+    console.error('Error checking documents:', error);
+    addMultilingualPrompt(twiml, 'databaseError', selectedLangCode);
+    twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
+    return twiml.toString();
+  }
+
+  // Prompt user to say which chapter they want explained
+  addMultilingualPrompt(twiml, 'chapterExplainPrompt', selectedLangCode);
+
+  twiml.record({
+    action: `${process.env.BASE_URL}/ivr/chapter-recorded`,
+    method: 'POST',
+    maxLength: 30,
+    finishOnKey: '3',
+    transcribe: false,
+    playBeep: true
+  });
+
+  return twiml.toString();
+}
+
+// Handle chapter recording - transcribe and process
+app.post('/ivr/chapter-recorded', async (req, res) => {
+  const callSid = req.body.CallSid;
+  const recordingUrl = req.body.RecordingUrl;
+  console.log(`📖 Chapter request recorded for call: ${callSid}`);
+
+  const session = userSessions.get(callSid) || {};
+  const selectedLangCode = session.selectedLanguage || 'en-US';
+  const voiceConfig = getVoiceConfig(selectedLangCode);
+
+  const twiml = new VoiceResponse();
+
+  try {
+    // Transcribe what chapter the user wants
+    let chapterRequest = '';
+    if (recordingUrl) {
+      const transcriptionResult = await transcribeAudio(recordingUrl, callSid, selectedLangCode);
+      chapterRequest = typeof transcriptionResult === 'string'
+        ? transcriptionResult
+        : (transcriptionResult.text || transcriptionResult.transcript || '');
+      console.log(`📝 Chapter request transcribed: "${chapterRequest}"`);
+    }
+
+    if (!chapterRequest) {
+      addMultilingualPrompt(twiml, 'noQuestion', selectedLangCode);
+      twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
+      res.type('text/xml');
+      res.send(twiml.toString());
+      return;
+    }
+
+    // Translate to English if needed
+    const langCode = selectedLangCode.split('-')[0];
+    let chapterRequestEnglish = chapterRequest;
+    if (langCode !== 'en') {
+      console.log(`🌐 Translating chapter request ${langCode} → English...`);
+      chapterRequestEnglish = await translateText(chapterRequest, 'en', langCode);
+      console.log(`📝 Translated: "${chapterRequestEnglish}"`);
+    }
+
+    // Get ALL documents from RAG and send full content to LLM
+    const { getLibrary } = require('./services/ragService');
+    const { getDatabase } = require('./database/connection');
+    const library = await getLibrary();
+
+    if (!library.documents || library.documents.length === 0) {
+      addMultilingualPrompt(twiml, 'noDocumentsUploaded', selectedLangCode);
+      twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
+      res.type('text/xml');
+      res.send(twiml.toString());
+      return;
+    }
+
+    // Say processing
+    twiml.say(
+      getPrompt('chapterProcessing', selectedLangCode),
+      voiceConfig
+    );
+
+    // Get the full content of all documents (send entire content to LLM)
+    const db = getDatabase();
+    const col = db.collection('rag_documents');
+    const allDocs = await col.find({}, { projection: { fileName: 1, content: 1, subject: 1 } }).toArray();
+
+    // Combine all document contents
+    let fullContent = '';
+    let mainFileName = '';
+    for (const doc of allDocs) {
+      fullContent += `\n\n=== Document: ${doc.fileName} (Subject: ${doc.subject || 'General'}) ===\n${doc.content}`;
+      if (!mainFileName) mainFileName = doc.fileName;
+    }
+
+    // Truncate if too large (Gemini context limit ~1M tokens, but 50K chars is practical for quality)
+    const MAX_CONTENT_LENGTH = 50000;
+    if (fullContent.length > MAX_CONTENT_LENGTH) {
+      console.log(`⚠️ Content too large (${fullContent.length} chars), truncating to ${MAX_CONTENT_LENGTH}`);
+      fullContent = fullContent.substring(0, MAX_CONTENT_LENGTH) + '\n\n[Content truncated due to length...]';
+    }
+
+    console.log(`📚 Sending ${allDocs.length} document(s) (${fullContent.length} chars) to LLM for chapter explanation`);
+
+    // Send full content to LLM for chapter explanation
+    const explanation = await aiProviderService.explainChapter(chapterRequestEnglish, fullContent, mainFileName);
+    console.log(`📖 Chapter explanation generated (${explanation.length} chars)`);
+
+    // Translate explanation back if needed
+    let explanationInUserLang = explanation;
+    if (langCode !== 'en') {
+      console.log(`🌐 Translating explanation → ${langCode}...`);
+      explanationInUserLang = await translateText(explanation, langCode, 'en');
+    }
+
+    // Convert to speech
+    const audioFileName = await textToSpeechConvert(
+      explanationInUserLang,
+      callSid,
+      selectedLangCode
+    );
+
+    if (audioFileName) {
+      const audioUrl = `${process.env.BASE_URL}/audio/${audioFileName}`;
+      console.log(`▶️ Playing chapter explanation: ${audioUrl}`);
+
+      // Store audio URL in session for pause/resume
+      session.pausedExplanationAudio = audioUrl;
+      session.lastChapterExplanation = explanation;
+      userSessions.set(callSid, session);
+
+      // Play with gather so user can press 8 to pause
+      const gather = twiml.gather({
+        action: `${process.env.BASE_URL}/ivr/menu`,
+        numDigits: '1',
+        method: 'POST',
+        input: 'dtmf'
+      });
+      gather.play(audioUrl);
+    } else {
+      // Fallback to Twilio TTS
+      const gather = twiml.gather({
+        action: `${process.env.BASE_URL}/ivr/menu`,
+        numDigits: '1',
+        method: 'POST',
+        input: 'dtmf'
+      });
+      gather.say(explanation, { voice: 'Polly.Joanna', language: 'en-US' });
+    }
+
+    // After explanation, offer options
+    const gather2 = twiml.gather({
+      action: `${process.env.BASE_URL}/ivr/menu`,
+      numDigits: '1',
+      method: 'POST',
+      timeout: 10
+    });
+    addMultilingualPrompt(gather2, 'afterChapterExplain', selectedLangCode, { loop: 2 });
+
+  } catch (error) {
+    console.error('❌ Error processing chapter request:', error);
+    addMultilingualPrompt(twiml, 'generalError', selectedLangCode);
+    twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
+  }
+
+  res.type('text/xml');
+  res.send(twiml.toString());
+});
+
+// Pause explanation (Option 8) - stops audio playback, lets user take notes
+function pauseExplanation(callSid, req) {
+  console.log(`⏸️ Pausing explanation for call: ${callSid}`);
+  const session = userSessions.get(callSid) || {};
+  const selectedLangCode = session.selectedLanguage || 'en-US';
+
+  const twiml = new VoiceResponse();
+
+  // Tell user it's paused and they can take notes
+  addMultilingualPrompt(twiml, 'pausedExplanation', selectedLangCode);
+
+  // Wait for user input - press 7 to continue, or other options
+  const gather = twiml.gather({
+    action: `${process.env.BASE_URL}/ivr/menu`,
+    numDigits: '1',
+    method: 'POST',
+    timeout: 120  // Wait up to 2 minutes for user to take notes
+  });
+
+  addMultilingualPrompt(gather, 'pausedExplanation', selectedLangCode, { loop: 1 });
+
+  // If no input after timeout, redirect to menu
+  twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
+
+  return twiml.toString();
+}
+
 // Return to main menu
 function returnToMenu(callSid, req) {
   console.log(`🔄 Returning to main menu for call: ${callSid}`);
@@ -1338,10 +1597,26 @@ app.post('/api/rag/upload', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, error: 'No file provided' });
 
-    const content = req.file.buffer.toString('utf-8');
-    const subject = req.body.subject || 'General';
     const fileName = req.file.originalname;
     const ext = path.extname(fileName).toLowerCase().replace('.', '');
+    const subject = req.body.subject || 'General';
+    let content = '';
+
+    // Parse based on file type
+    if (ext === 'pdf') {
+      // Use pdf-parse for proper PDF text extraction
+      const pdfParse = require('pdf-parse');
+      const pdfData = await pdfParse(req.file.buffer);
+      content = pdfData.text;
+      console.log(`📄 PDF parsed: ${fileName} - ${pdfData.numpages} pages, ${content.length} chars`);
+    } else {
+      // Plain text files (txt, md, csv, docx)
+      content = req.file.buffer.toString('utf-8');
+    }
+
+    if (!content || content.trim().length === 0) {
+      return res.status(400).json({ success: false, error: 'No readable text content found in file' });
+    }
 
     const result = await ragService.uploadDocument(fileName, content, subject, ext);
     res.json(result);

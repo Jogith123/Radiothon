@@ -98,6 +98,27 @@ async function generateSummary(subjectName, history) {
   }
 }
 
+async function explainChapter(chapterRequest, fullContent, fileName) {
+  try {
+    if (activeProvider === 'gemini' && geminiService.isInitialized()) {
+      return await geminiService.explainChapter(chapterRequest, fullContent, fileName);
+    }
+    
+    // OpenAI fallback - use generateAnswer with context
+    if (openaiService.isInitialized()) {
+      return await openaiService.generateAnswer(
+        `Explain this chapter from "${fileName}": ${chapterRequest}`,
+        fullContent
+      );
+    }
+    
+    throw new Error('No AI provider is initialized');
+  } catch (error) {
+    console.error('Error explaining chapter:', error);
+    throw error;
+  }
+}
+
 function isAnyProviderInitialized() {
   if (activeProvider === 'gemini' && geminiService.isInitialized()) return true;
   if (openaiService.isInitialized()) return true;
@@ -110,5 +131,6 @@ module.exports = {
   isAnyProviderInitialized,
   generateAnswer,
   classifySubject,
-  generateSummary
+  generateSummary,
+  explainChapter
 };
