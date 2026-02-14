@@ -6,7 +6,9 @@
  * Handles all communication with the backend RAG system
  */
 
-const RAG_BASE_URL = `${import.meta.env.VITE_BACKEND_URL || ''}/api/rag`;
+// Strip BOM (\uFEFF) and whitespace that Vercel CLI may inject into env vars
+const clean = (v) => (v || '').replace(/[\uFEFF\r\n]/g, '').trim();
+const RAG_BASE_URL = `${clean(import.meta.env.VITE_BACKEND_URL)}/api/rag`;
 
 /**
  * Upload a document to the RAG library

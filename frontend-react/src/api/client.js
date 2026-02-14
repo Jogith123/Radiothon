@@ -1,4 +1,6 @@
-const BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+// Strip BOM (\uFEFF) and whitespace that Vercel CLI may inject into env vars
+const clean = (v) => (v || '').replace(/[\uFEFF\r\n]/g, '').trim();
+const BASE_URL = clean(import.meta.env.VITE_BACKEND_URL) || 'http://localhost:3000';
 
 export const apiClient = async (endpoint, { method = 'GET', body, ...customConfig } = {}) => {
     const headers = { 'Content-Type': 'application/json' };

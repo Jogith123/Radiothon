@@ -33,9 +33,11 @@ export const WebSocketProvider = ({ children }) => {
     const connect = useCallback(() => {
         // Build WebSocket URL from API base or use explicit WS_URL
         // WebSocket is on the same port as the API server at path /ws
-        const apiBase = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+        // Strip BOM (\uFEFF) and whitespace that Vercel CLI may inject into env vars
+        const clean = (v) => (v || '').replace(/[\uFEFF\r\n]/g, '').trim();
+        const apiBase = clean(import.meta.env.VITE_BACKEND_URL) || 'http://localhost:3000';
         const wsBase = apiBase.replace(/^http/, 'ws');
-        const wsUrl = import.meta.env.VITE_WS_URL || `${wsBase}/ws`;
+        const wsUrl = clean(import.meta.env.VITE_WS_URL) || `${wsBase}/ws`;
 
         console.log('Connecting to WS:', wsUrl);
 

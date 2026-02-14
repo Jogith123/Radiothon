@@ -13,6 +13,7 @@ build/
 *.swo
 *~
 *.mp3
+!twilio-phone-call/audio/*.mp3
 *.wav
 *.m4a
 *.fig
