@@ -1145,9 +1145,9 @@ async function chapterExplain(callSid, req) {
   const twiml = new VoiceResponse();
 
   // Check if there are paused segments to resume from
-  if (session.explanationSegments && session.explanationSegments.length > 0 && session.currentSegmentIndex !== undefined) {
+  if (session.explanationTextSegments && session.explanationTextSegments.length > 0 && session.currentSegmentIndex !== undefined) {
     const resumeIndex = session.currentSegmentIndex;
-    console.log(`▶️ Resuming explanation from segment ${resumeIndex + 1}/${session.explanationSegments.length} for call: ${callSid}`);
+    console.log(`▶️ Resuming explanation from segment ${resumeIndex + 1}/${session.explanationTextSegments.length} for call: ${callSid}`);
     addMultilingualPrompt(twiml, 'continueExplanation', selectedLangCode);
 
     // Redirect to segment playback endpoint to play from the current segment
@@ -1188,7 +1188,8 @@ async function chapterExplain(callSid, req) {
   return twiml.toString();
 }
 
-// Handle chapter recording - transcribe and process
+// Handle chapter recording - transcribe and process ASYNCHRONOUSLY
+// Responds immediately to avoid Twilio's 15-second webhook timeout
 app.post('/ivr/chapter-recorded', async (req, res) => {
   const callSid = req.body.CallSid;
   const recordingUrl = req.body.RecordingUrl;
@@ -1196,12 +1197,42 @@ app.post('/ivr/chapter-recorded', async (req, res) => {
 
   const session = userSessions.get(callSid) || {};
   const selectedLangCode = session.selectedLanguage || 'en-US';
-  const voiceConfig = getVoiceConfig(selectedLangCode);
 
+  // Mark processing state and respond IMMEDIATELY
+  session.chapterProcessingDone = false;
+  session.chapterProcessingError = null;
+  userSessions.set(callSid, session);
+
+  // Kick off heavy processing in background (non-blocking)
+  processChapterRequest(callSid, recordingUrl, selectedLangCode).catch(err => {
+    console.error(`❌ Chapter processing failed for ${callSid}:`, err.message);
+    const s = userSessions.get(callSid) || {};
+    s.chapterProcessingError = err.message;
+    s.chapterProcessingDone = true;
+    userSessions.set(callSid, s);
+  });
+
+  // Respond immediately — tell user to wait, then poll for readiness
   const twiml = new VoiceResponse();
+  addMultilingualPrompt(twiml, 'chapterProcessing', selectedLangCode);
+  twiml.pause({ length: 3 });
+  twiml.redirect(`${process.env.BASE_URL}/ivr/chapter-ready?attempt=1`);
+
+  res.type('text/xml');
+  res.send(twiml.toString());
+});
+
+/**
+ * Background processor for chapter explanation.
+ * Does: STT → translate → RAG search → LLM → translate back → split into text segments.
+ * TTS is deferred to per-segment playback to keep each webhook fast.
+ */
+async function processChapterRequest(callSid, recordingUrl, selectedLangCode) {
+  const session = userSessions.get(callSid) || {};
+  const langCode = selectedLangCode.split('-')[0];
 
   try {
-    // Transcribe what chapter the user wants
+    // Step 1: Transcribe
     let chapterRequest = '';
     if (recordingUrl) {
       const transcriptionResult = await transcribeAudio(recordingUrl, callSid, selectedLangCode);
@@ -1212,21 +1243,16 @@ app.post('/ivr/chapter-recorded', async (req, res) => {
     }
 
     if (!chapterRequest) {
-      addMultilingualPrompt(twiml, 'noQuestion', selectedLangCode);
-      twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
-      res.type('text/xml');
-      res.send(twiml.toString());
-      return;
+      throw new Error('Empty transcription');
     }
 
-    // Translate to English if needed
-    const langCode = selectedLangCode.split('-')[0];
+    // Step 2: Translate to English if needed
     let chapterRequestEnglish = chapterRequest;
     if (langCode !== 'en') {
       console.log(`🌐 Translating chapter request ${langCode} → English...`);
       try {
         const translationPromise = translateText(chapterRequest, 'en', langCode);
-        const timeoutPromise = new Promise((_, reject) => 
+        const timeoutPromise = new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Translation timeout')), 10000)
         );
         chapterRequestEnglish = await Promise.race([translationPromise, timeoutPromise]);
@@ -1237,41 +1263,26 @@ app.post('/ivr/chapter-recorded', async (req, res) => {
       }
     }
 
-    // Check if RAG documents exist
-    const { getLibrary, vectorSearch } = require('./services/ragService');
+    // Step 3: RAG search
+    const { getLibrary, vectorSearch, searchDocuments } = require('./services/ragService');
     const library = await getLibrary();
 
     if (!library.documents || library.documents.length === 0) {
-      addMultilingualPrompt(twiml, 'noDocumentsUploaded', selectedLangCode);
-      twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
-      res.type('text/xml');
-      res.send(twiml.toString());
-      return;
+      throw new Error('No documents uploaded');
     }
 
-    // Say processing
-    twiml.say(
-      getPrompt('chapterProcessing', selectedLangCode),
-      voiceConfig
-    );
-
-    // Use vector search to find relevant chunks (instead of sending full document)
     const searchResults = await vectorSearch(chapterRequestEnglish, 15, 0.2);
-
     let relevantContent = '';
     let mainFileName = '';
 
     if (searchResults.results.length > 0) {
-      // Build context from relevant chunks only
       for (const chunk of searchResults.results) {
         relevantContent += `\n\n[${chunk.fileName} - ${chunk.chapterTitle}]:\n${chunk.content}`;
         if (!mainFileName) mainFileName = chunk.fileName;
       }
-      console.log(`📚 Vector search found ${searchResults.results.length} relevant chunks (${relevantContent.length} chars) from ${searchResults.totalChunksSearched} total chunks`);
+      console.log(`📚 Vector search found ${searchResults.results.length} relevant chunks (${relevantContent.length} chars)`);
     } else {
-      // Fallback: if vector search finds nothing, try text search
-      console.log('⚠️ Vector search returned no results, trying text search fallback...');
-      const { searchDocuments } = require('./services/ragService');
+      console.log('⚠️ Vector search empty, trying text search fallback...');
       const textResults = await searchDocuments(chapterRequestEnglish, 10, 0.1);
       for (const chunk of textResults.results) {
         relevantContent += `\n\n[${chunk.fileName} - ${chunk.chapterTitle}]:\n${chunk.content}`;
@@ -1281,26 +1292,21 @@ app.post('/ivr/chapter-recorded', async (req, res) => {
     }
 
     if (!relevantContent) {
-      addMultilingualPrompt(twiml, 'noDocumentsUploaded', selectedLangCode);
-      twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
-      res.type('text/xml');
-      res.send(twiml.toString());
-      return;
+      throw new Error('No relevant content found');
     }
 
-    // Send only relevant chunks to LLM for chapter explanation
+    // Step 4: LLM explanation
     const explanationRaw = await aiProviderService.explainChapter(chapterRequestEnglish, relevantContent, mainFileName);
-    // Strip markdown formatting to prevent TTS reading "asterisk asterisk"
     const explanation = stripMarkdown(explanationRaw);
     console.log(`📖 Chapter explanation generated (${explanation.length} chars, markdown stripped)`);
 
-    // Translate explanation back if needed
+    // Step 5: Translate explanation back if needed
     let explanationInUserLang = explanation;
     if (langCode !== 'en') {
       console.log(`🌐 Translating explanation → ${langCode}...`);
       try {
         const translationPromise = translateText(explanation, langCode, 'en');
-        const timeoutPromise = new Promise((_, reject) => 
+        const timeoutPromise = new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Translation timeout')), 10000)
         );
         explanationInUserLang = await Promise.race([translationPromise, timeoutPromise]);
@@ -1310,58 +1316,59 @@ app.post('/ivr/chapter-recorded', async (req, res) => {
       }
     }
 
-    // Convert to speech - split into segments for pause/resume support
-    // Split text into segments (~3-5 segments based on sentence boundaries)
+    // Step 6: Split into TEXT segments (TTS generated per-segment during playback)
     const segments = splitIntoSegments(explanationInUserLang, 4);
-    console.log(`📖 Split explanation into ${segments.length} segments for pause/resume`);
+    console.log(`📖 Split explanation into ${segments.length} text segments for on-demand TTS`);
 
-    const segmentAudioUrls = [];
-    for (let i = 0; i < segments.length; i++) {
-      const audioFileName = await textToSpeechConvert(
-        segments[i],
-        `${callSid}_seg${i}`,
-        selectedLangCode
-      );
-      if (audioFileName) {
-        segmentAudioUrls.push(`${process.env.BASE_URL}/audio/${audioFileName}`);
-      }
-    }
+    // Store in session
+    session.explanationTextSegments = segments;
+    session.explanationSegments = [];   // audio URLs filled during playback
+    session.currentSegmentIndex = 0;
+    session.lastChapterExplanation = explanation;
+    session.chapterProcessingDone = true;
+    session.chapterProcessingError = null;
+    userSessions.set(callSid, session);
 
-    if (segmentAudioUrls.length > 0) {
-      console.log(`▶️ Generated ${segmentAudioUrls.length} audio segments`);
-
-      // Store segments in session for pause/resume
-      session.explanationSegments = segmentAudioUrls;
-      session.currentSegmentIndex = 0;
-      session.lastChapterExplanation = explanation;
-      userSessions.set(callSid, session);
-
-      // Redirect to segment playback which handles sequential play
-      twiml.redirect(`${process.env.BASE_URL}/ivr/chapter-segment?index=0`);
-    } else {
-      // Fallback to Twilio TTS (no segment support)
-      const gather = twiml.gather({
-        action: `${process.env.BASE_URL}/ivr/menu`,
-        numDigits: '1',
-        method: 'POST',
-        input: 'dtmf'
-      });
-      gather.say(explanation, { voice: 'Polly.Joanna', language: 'en-US' });
-
-      // After explanation, offer options
-      const gather2 = twiml.gather({
-        action: `${process.env.BASE_URL}/ivr/menu`,
-        numDigits: '1',
-        method: 'POST',
-        timeout: 10
-      });
-      addMultilingualPrompt(gather2, 'afterChapterExplain', selectedLangCode, { loop: 2 });
-    }
+    console.log(`✅ Chapter processing complete for ${callSid} — ${segments.length} segments ready`);
 
   } catch (error) {
-    console.error('❌ Error processing chapter request:', error);
-    addMultilingualPrompt(twiml, 'generalError', selectedLangCode);
-    twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
+    console.error(`❌ Chapter processing error for ${callSid}:`, error.message);
+    session.chapterProcessingDone = true;
+    session.chapterProcessingError = error.message;
+    userSessions.set(callSid, session);
+  }
+}
+
+/**
+ * Polling endpoint — checks if async chapter processing is done.
+ * Max 6 attempts (~18 seconds of waiting), then gives up gracefully.
+ */
+app.post('/ivr/chapter-ready', (req, res) => {
+  const callSid = req.body.CallSid;
+  const attempt = parseInt(req.query.attempt || '1', 10);
+  const session = userSessions.get(callSid) || {};
+  const selectedLangCode = session.selectedLanguage || 'en-US';
+
+  const twiml = new VoiceResponse();
+
+  if (session.chapterProcessingDone) {
+    if (session.chapterProcessingError) {
+      console.log(`❌ Chapter processing failed for ${callSid}: ${session.chapterProcessingError}`);
+      addMultilingualPrompt(twiml, 'generalError', selectedLangCode);
+      twiml.redirect(`${process.env.BASE_URL}/ivr/menu`);
+    } else {
+      console.log(`✅ Chapter ready for ${callSid} — redirecting to segment playback`);
+      twiml.redirect(`${process.env.BASE_URL}/ivr/chapter-segment?index=0`);
+    }
+  } else if (attempt >= 6) {
+    console.log(`⏰ Chapter processing timeout for ${callSid} after ${attempt} attempts`);
+    addMultilingualPrompt(twiml, 'stillProcessing', selectedLangCode);
+    twiml.redirect(`${process.env.BASE_URL}/ivr/menu`);
+  } else {
+    // Still processing — wait and poll again
+    console.log(`⏳ Chapter still processing for ${callSid} (attempt ${attempt}/6)`);
+    twiml.pause({ length: 3 });
+    twiml.redirect(`${process.env.BASE_URL}/ivr/chapter-ready?attempt=${attempt + 1}`);
   }
 
   res.type('text/xml');
@@ -1401,24 +1408,26 @@ function splitIntoSegments(text, targetSegments = 4) {
 
 /**
  * Endpoint to play a specific segment of a chapter explanation.
- * Plays segment at ?index=N, then chains to next segment or offers options.
+ * Generates TTS on-demand for each segment to keep each webhook fast (~2s).
  * User can press 8 to pause at any time during playback.
  */
-app.post('/ivr/chapter-segment', (req, res) => {
+app.post('/ivr/chapter-segment', async (req, res) => {
   const callSid = req.body.CallSid;
   const segmentIndex = parseInt(req.query.index || '0', 10);
   const session = userSessions.get(callSid) || {};
   const selectedLangCode = session.selectedLanguage || 'en-US';
-  const segments = session.explanationSegments || [];
+  const textSegments = session.explanationTextSegments || [];
+  const audioSegments = session.explanationSegments || [];
 
   const twiml = new VoiceResponse();
 
-  if (segmentIndex >= segments.length || segments.length === 0) {
+  if (segmentIndex >= textSegments.length || textSegments.length === 0) {
     // All segments played - offer options
-    console.log(`✅ All ${segments.length} segments played for call: ${callSid}`);
+    console.log(`✅ All ${textSegments.length} segments played for call: ${callSid}`);
     
     // Clear segment data
     session.explanationSegments = null;
+    session.explanationTextSegments = null;
     session.currentSegmentIndex = undefined;
     userSessions.set(callSid, session);
 
@@ -1430,20 +1439,47 @@ app.post('/ivr/chapter-segment', (req, res) => {
     });
     addMultilingualPrompt(gather, 'afterChapterExplain', selectedLangCode, { loop: 2 });
   } else {
-    // Play current segment with gather for pause (press 8)
-    console.log(`▶️ Playing segment ${segmentIndex + 1}/${segments.length} for call: ${callSid}`);
+    // Generate TTS for this segment on-demand (if not already cached)
+    console.log(`▶️ Playing segment ${segmentIndex + 1}/${textSegments.length} for call: ${callSid}`);
     
     // Update current segment index BEFORE playing
     session.currentSegmentIndex = segmentIndex;
     userSessions.set(callSid, session);
 
-    const gather = twiml.gather({
-      action: `${process.env.BASE_URL}/ivr/menu`,
-      numDigits: '1',
-      method: 'POST',
-      input: 'dtmf'
-    });
-    gather.play(segments[segmentIndex]);
+    let audioUrl = audioSegments[segmentIndex];
+    if (!audioUrl) {
+      // Generate TTS for this segment now
+      try {
+        const audioFileName = await textToSpeechConvert(
+          textSegments[segmentIndex],
+          `${callSid}_seg${segmentIndex}`,
+          selectedLangCode
+        );
+        if (audioFileName) {
+          audioUrl = `${process.env.BASE_URL}/audio/${audioFileName}`;
+          // Cache the URL for potential replay
+          if (!session.explanationSegments) session.explanationSegments = [];
+          session.explanationSegments[segmentIndex] = audioUrl;
+          userSessions.set(callSid, session);
+        }
+      } catch (err) {
+        console.error(`❌ TTS failed for segment ${segmentIndex}:`, err.message);
+      }
+    }
+
+    if (audioUrl) {
+      const gather = twiml.gather({
+        action: `${process.env.BASE_URL}/ivr/menu`,
+        numDigits: '1',
+        method: 'POST',
+        input: 'dtmf'
+      });
+      gather.play(audioUrl);
+    } else {
+      // Fallback: use Polly for this segment (English only)
+      const voiceConfig = getVoiceConfig('en-US');
+      twiml.say(textSegments[segmentIndex], { voice: 'Polly.Joanna', language: 'en-US' });
+    }
 
     // When this segment finishes (no DTMF pressed), advance to next segment
     twiml.redirect(`${process.env.BASE_URL}/ivr/chapter-segment?index=${segmentIndex + 1}`);
@@ -1464,7 +1500,7 @@ function pauseExplanation(callSid, req) {
   // The segment index is already saved - when user pressed 8 during a gather,
   // the gather stops and currentSegmentIndex reflects where they were
   const segIdx = session.currentSegmentIndex || 0;
-  const totalSegs = session.explanationSegments?.length || 0;
+  const totalSegs = session.explanationTextSegments?.length || 0;
   console.log(`⏸️ Paused at segment ${segIdx + 1}/${totalSegs}`);
 
   // Advance to next segment so resume doesn't replay the interrupted segment
