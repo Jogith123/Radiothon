@@ -6,11 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "server": "node server.js",
-    "dev": "set PORT=3001&& nodemon server.js",
-    "tunnel": "lt --port 3000",
-    "update-url": "node update-url.js",
-    "test-mongodb": "node test-mongodb.js",
-    "test-classification": "node test-classification.js"
+    "dev": "set PORT=3001&& nodemon server.js"
   },
   "keywords": [
     "twilio",

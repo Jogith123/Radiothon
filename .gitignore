@@ -1,20 +1,55 @@
+# ─── Dependencies ─────────────────────────────────
 node_modules/
+
+# ─── Environment / Secrets ────────────────────────
 .env
 .env.local
 .env.*.local
+.env.production
 google-credentials.json
+
+# ─── Build output ─────────────────────────────────
 dist/
 build/
+
+# ─── Logs ─────────────────────────────────────────
 *.log
+out.log
+
+# ─── OS / Editor ──────────────────────────────────
 .DS_Store
+Thumbs.db
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
+
+# ─── Audio (allow pre-generated static prompts) ──
 *.mp3
 !twilio-phone-call/audio/*.mp3
+twilio-phone-call/audio/answer_*.mp3
 *.wav
 *.m4a
+
+# ─── Design files ─────────────────────────────────
 *.fig
+
+# ─── Hosting ──────────────────────────────────────
 .vercel
+
+# ─── Backup / test scripts (dev-only) ─────────────
+*_backup.js
+*_backup_*.js
+test-*.js
+check-*.js
+generate-*.js
+regenerate-*.js
+makeCall.js
+create-admin.js
+update-url.js
+fix-ngrok.ps1
+start-ngrok.bat
+FOLDER_STRUCTURE.txt
+ai.md
+PipelineVisualizer.jsx
