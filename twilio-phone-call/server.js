@@ -379,8 +379,18 @@ async function processTranscription(recordingUrl, callSid) {
     let questionForAI = transcriptionText;
     if (langCode !== 'en') {
       console.log(`🌐 Translating ${langCode} → English for AI processing...`);
-      questionForAI = await translateText(transcriptionText, 'en', langCode);
-      console.log(`📝 Translated question: "${questionForAI}"`);
+      try {
+        // Add timeout to prevent hanging (10 seconds max)
+        const translationPromise = translateText(transcriptionText, 'en', langCode);
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Translation timeout')), 10000)
+        );
+        questionForAI = await Promise.race([translationPromise, timeoutPromise]);
+        console.log(`📝 Translated question: "${questionForAI}"`);
+      } catch (error) {
+        console.error(`⚠️ Translation failed (${error.message}), using original text`);
+        questionForAI = transcriptionText; // Use original Telugu/Hindi/Tamil text
+      }
     }
 
     // Save both original and translated to session
@@ -429,8 +439,17 @@ async function processFollowupTranscription(recordingUrl, callSid) {
     let additionalDetailsEnglish = additionalDetails;
     if (langCode !== 'en') {
       console.log(`🌐 Translating ${langCode} → English...`);
-      additionalDetailsEnglish = await translateText(additionalDetails, 'en', langCode);
-      console.log(`📝 Translated details: "${additionalDetailsEnglish}"`);
+      try {
+        const translationPromise = translateText(additionalDetails, 'en', langCode);
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Translation timeout')), 10000)
+        );
+        additionalDetailsEnglish = await Promise.race([translationPromise, timeoutPromise]);
+        console.log(`📝 Translated details: "${additionalDetailsEnglish}"`);
+      } catch (error) {
+        console.error(`⚠️ Translation failed (${error.message}), using original text`);
+        additionalDetailsEnglish = additionalDetails;
+      }
     }
 
     // Combine with original question
@@ -542,8 +561,17 @@ async function getAnswer(callSid, req) {
     }
 
     // Get user's language from session
-    const questionLanguage = session.questionLanguage || 'en';
-    const detectedLanguageCode = session.detectedLanguageCode || 'en-US';
+    cotry {
+        const translationPromise = translateText(answerEnglish, questionLanguage, 'en');
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Translation timeout')), 10000)
+        );
+        answerInUserLanguage = await Promise.race([translationPromise, timeoutPromise]);
+        console.log(`📝 Answer (${questionLanguage}): ${answerInUserLanguage}`);
+      } catch (error) {
+        console.error(`⚠️ Answer translation failed (${error.message}), using English`);
+        answerInUserLanguage = answerEnglish; // Fallback to English
+      }
 
     console.log(`🌐 Language Info: Detected="${detectedLanguageCode}", Code="${questionLanguage}"`);
 
@@ -1033,8 +1061,17 @@ app.post('/ivr/chapter-recorded', async (req, res) => {
     let chapterRequestEnglish = chapterRequest;
     if (langCode !== 'en') {
       console.log(`🌐 Translating chapter request ${langCode} → English...`);
-      chapterRequestEnglish = await translateText(chapterRequest, 'en', langCode);
-      console.log(`📝 Translated: "${chapterRequestEnglish}"`);
+      try {
+        const translationPromise = translateText(chapterRequest, 'en', langCode);
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Translation timeout')), 10000)
+        );
+        chapterRequestEnglish = await Promise.race([translationPromise, timeoutPromise]);
+        console.log(`📝 Translated: "${chapterRequestEnglish}"`);
+      } catch (error) {
+        console.error(`⚠️ Translation failed (${error.message}), using original text`);
+        chapterRequestEnglish = chapterRequest;
+      }
     }
 
     // Check if RAG documents exist
@@ -1096,7 +1133,16 @@ app.post('/ivr/chapter-recorded', async (req, res) => {
     let explanationInUserLang = explanation;
     if (langCode !== 'en') {
       console.log(`🌐 Translating explanation → ${langCode}...`);
-      explanationInUserLang = await translateText(explanation, langCode, 'en');
+      try {
+        const translationPromise = translateText(explanation, langCode, 'en');
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Translation timeout')), 10000)
+        );
+        explanationInUserLang = await Promise.race([translationPromise, timeoutPromise]);
+      } catch (error) {
+        console.error(`⚠️ Explanation translation failed (${error.message}), using English`);
+        explanationInUserLang = explanation;
+      }
     }
 
     // Convert to speech
