@@ -41,7 +41,7 @@ const server = http.createServer(app);
 async function initializeServices() {
   console.log('🚀 Initializing Vidya Vani services...\n');
 
-  // Initialize AI Provider (auto-detects Gemini or OpenAI)
+  // Initialize AI Provider (auto-detects OpenAI or Gemini)
   await aiProviderService.initializeAIProvider();
   console.log(`✅ Active AI Provider: ${aiProviderService.getActiveProvider()}`);
 
@@ -635,7 +635,7 @@ app.post('/ivr/transcription', async (req, res) => {
   res.sendStatus(200);
 });
 
-// Get answer from Gemini AI — matches chapterExplain flow exactly
+// Get answer from AI — matches chapterExplain flow exactly
 async function getAnswer(callSid, req) {
   const startTime = Date.now();
   console.log(`\n========== GET ANSWER START (${callSid}) ==========`);
