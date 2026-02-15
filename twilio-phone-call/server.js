@@ -12,7 +12,7 @@ const aiProviderService = require('./services/aiProviderService');
 const { initializeTTS, initializeSTT, textToSpeechConvert, transcribeAudio } = require('./services/speechService');
 const { storeQuestionAndAnswer, getHistoryBySubject, getUserStats, getAllHistory } = require('./services/historyService');
 const { initializeTranslation, detectLanguage, translateText, isTranslationAvailable } = require('./services/translationService');
-const { initializeWebSocket, broadcastCallStarted, broadcastQuestionTranscribed, broadcastAnswerGenerated, broadcastQASaved, broadcastCallEnded, broadcastPipelineStage, closeWebSocket } = require('./services/websocketService');
+const { initializeWebSocket, broadcastCallStarted, broadcastQuestionTranscribed, broadcastAnswerGenerated, broadcastQASaved, broadcastCallEnded, broadcastPipelineStage, broadcastMetrics, closeWebSocket } = require('./services/websocketService');
 const { getLanguageByDigit, getPrompt, getVoiceConfig, PROMPTS } = require('./config/languageConfig');
 
 const app = express();
@@ -143,6 +143,78 @@ function addMultilingualPrompt(twimlObject, promptKey, langCode, options = {}) {
 const userSessions = new Map();
 
 // ============================================
+// METRICS TRACKING
+// ============================================
+
+const callMetrics = {
+  totalCallsToday: 0,
+  callsStartTime: new Date().toDateString(), // Reset daily
+  latencies: [], // Track last 100 latencies for average
+  sttTimes: [],
+  llmTimes: [],
+  ttsTimes: [],
+  maxHistorySize: 100
+};
+
+function trackCallStart() {
+  // Check if new day, reset counter
+  const today = new Date().toDateString();
+  if (callMetrics.callsStartTime !== today) {
+    callMetrics.totalCallsToday = 0;
+    callMetrics.callsStartTime = today;
+  }
+  callMetrics.totalCallsToday++;
+}
+
+function trackLatency(sttMs, llmMs, ttsMs) {
+  const total = (sttMs || 0) + (llmMs || 0) + (ttsMs || 0);
+  
+  callMetrics.latencies.push(total);
+  if (sttMs) callMetrics.sttTimes.push(sttMs);
+  if (llmMs) callMetrics.llmTimes.push(llmMs);
+  if (ttsMs) callMetrics.ttsTimes.push(ttsMs);
+  
+  // Keep only last N entries
+  if (callMetrics.latencies.length > callMetrics.maxHistorySize) {
+    callMetrics.latencies.shift();
+  }
+  if (callMetrics.sttTimes.length > callMetrics.maxHistorySize) {
+    callMetrics.sttTimes.shift();
+  }
+  if (callMetrics.llmTimes.length > callMetrics.maxHistorySize) {
+    callMetrics.llmTimes.shift();
+  }
+  if (callMetrics.ttsTimes.length > callMetrics.maxHistorySize) {
+    callMetrics.ttsTimes.shift();
+  }
+}
+
+function getAverageMetrics() {
+  const avg = (arr) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
+  
+  return {
+    totalCalls: callMetrics.totalCallsToday,
+    activeSessions: userSessions.size,
+    avgLatency: avg(callMetrics.latencies),
+    sttTime: avg(callMetrics.sttTimes),
+    llmTime: avg(callMetrics.llmTimes),
+    ttsTime: avg(callMetrics.ttsTimes)
+  };
+}
+
+// Broadcast metrics every 10 seconds
+function startMetricsBroadcast() {
+  setInterval(() => {
+    try {
+      const metrics = getAverageMetrics();
+      broadcastMetrics(metrics);
+    } catch (error) {
+      console.error('Error broadcasting metrics:', error.message);
+    }
+  }, 10000); // 10 seconds
+}
+
+// ============================================
 // IVR ENDPOINTS
 // ============================================
 
@@ -158,6 +230,9 @@ app.post('/ivr/welcome', (req, res) => {
   } catch (error) {
     // Silent fail - don't affect phone call
   }
+
+  // Track call start for metrics
+  trackCallStart();
 
   // Initialize session
   userSessions.set(callSid, {
@@ -661,7 +736,11 @@ async function getAnswer(callSid, req) {
     });
     addMultilingualPrompt(gather, 'afterAnswer', selectedLangCode, { loop: 2 });
 
-    console.log(`========== GET ANSWER COMPLETE (${callSid}) total=${Date.now() - startTime}ms ==========\n`);
+    // Track latency metrics (approximate: total time represents combined STT+LLM+TTS)
+    const totalTime = Date.now() - startTime;
+    trackLatency(0, totalTime, 0); // Store in LLM slot for now
+
+    console.log(`========== GET ANSWER COMPLETE (${callSid}) total=${totalTime}ms ==========\n`);
 
   } catch (error) {
     console.error(`❌ GET ANSWER ERROR (${callSid}) +${Date.now() - startTime}ms:`, error);
@@ -2049,6 +2128,10 @@ async function startServer() {
     console.log(`🚀 Server is running on port ${PORT}`);
     console.log(`🔌 WebSocket available at ws://localhost:${PORT}/ws`);
     console.log(`📞 Twilio webhook URL: ${process.env.BASE_URL || `http://localhost:${PORT}`}/ivr/welcome`);
+    
+    // Start broadcasting metrics every 10 seconds
+    startMetricsBroadcast();
+    console.log(`📊 Metrics broadcast started (10s interval)`);
   });
 }
 

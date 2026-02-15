@@ -4,7 +4,7 @@
  */
 
 const History = require('../models/History');
-const { classifySubject } = require('./openaiService');
+const { classifySubject } = require('./aiProviderService');
 
 /**
  * Store a question and answer with automatic subject classification
