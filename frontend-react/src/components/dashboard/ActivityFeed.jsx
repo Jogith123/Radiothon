@@ -1,76 +1,53 @@
 /**
- * ActivityFeed Component
- * Displays real-time activity log with staggered animations.
+ * ActivityFeed — clean, flat log display
  */
 
 import React from 'react';
 import { Clock } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { useWebSocket } from '../../context/WebSocketContext';
-import { containerVariants, listItemVariants, transitions } from '../../lib/motion';
 
 const MAX_VISIBLE_ACTIVITIES = 5;
 
 const ActivityFeed = React.memo(() => {
     const { logs } = useWebSocket();
 
-    // Filter out verbose low-level system logs
     const activities = logs
         .filter(log => !log.message?.includes('metrics') && !log.message?.includes('Stage Update'))
         .slice(0, MAX_VISIBLE_ACTIVITIES);
 
     const getStatusColor = (type) => {
         switch (type) {
-            case 'error': return 'bg-red-500';
-            case 'success': return 'bg-green-500';
-            default: return 'bg-primary';
+            case 'error': return 'bg-[#B91C1C]';
+            case 'success': return 'bg-[#15803D]';
+            default: return 'bg-[#1E293B]';
         }
     };
 
     return (
-        <motion.div
-            variants={containerVariants}
-            initial="hidden"
-            animate="visible"
-            className="glass p-6 rounded-2xl h-full"
-        >
-            <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-4">Recent Activity</h3>
+        <div className="bg-white rounded-[10px] border border-[#E5E7EB] p-6 h-full">
+            <h3 className="text-sm font-semibold text-[#111827] mb-4">Recent Activity</h3>
             <div className="space-y-4">
-                <AnimatePresence mode="popLayout">
-                    {activities.length === 0 && (
-                        <motion.div
-                            key="empty"
-                            variants={listItemVariants}
-                            className="text-slate-400 text-sm italic"
-                        >
-                            No recent activity
-                        </motion.div>
-                    )}
-                    {activities.map((activity) => (
-                        <motion.div
-                            key={activity.id}
-                            variants={listItemVariants}
-                            initial="hidden"
-                            animate="visible"
-                            exit={{ opacity: 0, x: 20 }}
-                            transition={transitions.default}
-                            layout
-                            className="relative pl-6 pb-2 border-l border-slate-200 dark:border-slate-700 last:border-0 last:pb-0"
-                        >
-                            <div className={`absolute left-[-5px] top-0 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-surface-dark ${getStatusColor(activity.type)}`} />
+                {activities.length === 0 && (
+                    <p className="text-[#6B7280] text-sm">No recent activity</p>
+                )}
+                {activities.map((activity) => (
+                    <div
+                        key={activity.id}
+                        className="relative pl-5 pb-2 border-l border-[#E5E7EB] last:border-0 last:pb-0"
+                    >
+                        <div className={`absolute left-[-4px] top-0.5 w-2 h-2 rounded-full ${getStatusColor(activity.type)}`} />
 
-                            <p className="text-sm text-slate-800 dark:text-slate-200 font-medium mb-1 break-words">
-                                {activity.message}
-                            </p>
-                            <div className="flex items-center gap-1 text-xs text-slate-400">
-                                <Clock size={12} />
-                                {activity.timestamp}
-                            </div>
-                        </motion.div>
-                    ))}
-                </AnimatePresence>
+                        <p className="text-sm text-[#111827] mb-1 break-words">
+                            {activity.message}
+                        </p>
+                        <div className="flex items-center gap-1 text-xs text-[#6B7280]">
+                            <Clock size={11} />
+                            {activity.timestamp}
+                        </div>
+                    </div>
+                ))}
             </div>
-        </motion.div>
+        </div>
     );
 });
 

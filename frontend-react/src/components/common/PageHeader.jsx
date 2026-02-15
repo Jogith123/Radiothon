@@ -5,8 +5,6 @@
  */
 
 import React from 'react';
-import { motion } from 'framer-motion';
-import { cardVariants, transitions } from '../../lib/motion';
 
 const PageHeader = React.memo(({
     title,
@@ -15,19 +13,15 @@ const PageHeader = React.memo(({
     className,
 }) => {
     return (
-        <motion.div
-            variants={cardVariants}
-            initial="hidden"
-            animate="visible"
-            transition={transitions.default}
+        <div
             className={`flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 mb-8 ${className || ''}`}
         >
             <div>
-                <h1 className="text-2xl font-bold text-slate-800 dark:text-white">
+                <h1 className="text-2xl font-semibold text-[#111827]">
                     {title}
                 </h1>
                 {description && (
-                    <p className="text-slate-500 dark:text-slate-400 mt-1">
+                    <p className="text-[#6B7280] mt-1 text-sm">
                         {description}
                     </p>
                 )}
@@ -38,7 +32,7 @@ const PageHeader = React.memo(({
                     {actions}
                 </div>
             )}
-        </motion.div>
+        </div>
     );
 });
 

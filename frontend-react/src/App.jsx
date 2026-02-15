@@ -5,8 +5,7 @@
 
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { AnimatePresence } from 'framer-motion';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 
 // Layout & Pages
 import DashboardLayout from './components/layout/DashboardLayout';
@@ -38,22 +37,18 @@ const queryClient = new QueryClient({
  * Protected dashboard routes — only accessible after admin login
  */
 const ProtectedRoutes = () => {
-  const location = useLocation();
-
   return (
     <ProtectedRoute>
       <WebSocketProvider>
         <DashboardLayout>
-          <AnimatePresence mode="wait">
-            <Routes location={location} key={location.pathname}>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/calls" element={<LiveCalls />} />
-              <Route path="/analytics" element={<Analytics />} />
-              <Route path="/history" element={<CallHistory />} />
-              <Route path="/content" element={<ContentLibrary />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </AnimatePresence>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/calls" element={<LiveCalls />} />
+            <Route path="/analytics" element={<Analytics />} />
+            <Route path="/history" element={<CallHistory />} />
+            <Route path="/content" element={<ContentLibrary />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
         </DashboardLayout>
       </WebSocketProvider>
     </ProtectedRoute>

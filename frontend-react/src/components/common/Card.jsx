@@ -1,24 +1,14 @@
 /**
- * Reusable Card Component
- * 
- * Features:
- * - Glassmorphism styling
- * - Optional hover animations
- * - Multiple padding options
+ * Card Component — flat white surface with subtle border
  */
 
 import React from 'react';
-import { motion } from 'framer-motion';
 import { clsx } from 'clsx';
-import { cardVariants, cardHover, transitions } from '../../lib/motion';
 
 const Card = React.memo(({
     children,
     className,
     padding = 'default',
-    hover = false,
-    animate = true,
-    as: Component = 'div',
     ...props
 }) => {
     const paddingStyles = {
@@ -28,29 +18,17 @@ const Card = React.memo(({
         lg: 'p-8',
     };
 
-    const MotionComponent = animate ? motion[Component] || motion.div : Component;
-
-    const motionProps = animate ? {
-        variants: cardVariants,
-        initial: 'hidden',
-        animate: 'visible',
-        whileHover: hover ? cardHover : undefined,
-        transition: transitions.default,
-    } : {};
-
     return (
-        <MotionComponent
+        <div
             className={clsx(
-                'glass rounded-2xl',
+                'bg-white rounded-[10px] border border-[#E5E7EB]',
                 paddingStyles[padding],
-                hover && 'cursor-pointer',
                 className
             )}
-            {...motionProps}
             {...props}
         >
             {children}
-        </MotionComponent>
+        </div>
     );
 });
 

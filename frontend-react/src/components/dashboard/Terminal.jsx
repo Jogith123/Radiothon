@@ -11,7 +11,7 @@ const Terminal = () => {
     }, [logs]);
 
     return (
-        <div className="bg-[#0d1117] rounded-xl border border-slate-800 flex flex-col h-[600px] shadow-2xl overflow-hidden font-mono text-xs md:text-sm">
+        <div className="bg-[#0d1117] rounded-[10px] border border-[#E5E7EB] flex flex-col h-[600px] overflow-hidden font-mono text-xs md:text-sm">
             <div className="bg-slate-800 px-4 py-2 flex justify-between items-center select-none">
                 <div className="flex items-center gap-2 text-slate-400">
                     <TerminalIcon size={14} />

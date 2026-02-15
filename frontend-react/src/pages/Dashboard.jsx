@@ -5,23 +5,17 @@
 
 import React, { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
 import { Download, Radio } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// Components
 import { PageHeader, Button } from '../components/common';
 import HeroMetricsGrid from '../components/dashboard/HeroMetricsGrid';
 import PipelineVisualizer from '../components/dashboard/PipelineVisualizer';
 import ActivityFeed from '../components/dashboard/ActivityFeed';
 import ChartsSection from '../components/dashboard/ChartsSection';
 
-// Hooks & Context
 import { useWebSocket } from '../context/WebSocketContext';
-
-// Motion presets
-import { containerVariants, cardVariants } from '../lib/motion';
 
 const Dashboard = () => {
     const navigate = useNavigate();
@@ -60,7 +54,7 @@ const Dashboard = () => {
             head: [['Metric', 'Value']],
             body: metricsData,
             theme: 'grid',
-            headStyles: { fillColor: [79, 70, 229] },
+            headStyles: { fillColor: [30, 41, 59] },
             styles: { fontSize: 10, cellPadding: 5 },
             columnStyles: { 0: { fontStyle: 'bold', width: 80 } }
         });
@@ -92,11 +86,7 @@ const Dashboard = () => {
     }, [metrics, logs]);
 
     return (
-        <motion.div
-            variants={containerVariants}
-            initial="hidden"
-            animate="visible"
-        >
+        <div>
             <PageHeader
                 title="System Overview"
                 description="Real-time metrics and performance analytics"
@@ -114,10 +104,7 @@ const Dashboard = () => {
 
             <HeroMetricsGrid />
 
-            <motion.div
-                variants={cardVariants}
-                className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8"
-            >
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8">
                 <div className="xl:col-span-2">
                     <PipelineVisualizer />
                     <ChartsSection />
@@ -125,8 +112,8 @@ const Dashboard = () => {
                 <div className="xl:col-span-1">
                     <ActivityFeed />
                 </div>
-            </motion.div>
-        </motion.div>
+            </div>
+        </div>
     );
 };
 
