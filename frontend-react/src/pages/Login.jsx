@@ -33,9 +33,9 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#f5f3ff]">
+    <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-background-dark">
       {/* Government-style top bar */}
-      <div className="bg-[#4c1d95] text-white">
+      <div className="bg-primary text-white">
         <div className="max-w-7xl mx-auto px-4 py-2 flex items-center justify-between text-xs">
           <div className="flex items-center gap-2">
             <Shield size={14} />
@@ -46,14 +46,14 @@ const Login = () => {
       </div>
 
       {/* Header band */}
-      <div className="bg-white border-b border-[#e5e7eb] shadow-sm">
+      <div className="bg-white dark:bg-surface-dark border-b border-slate-200 dark:border-slate-700 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center gap-4">
-          <div className="w-12 h-12 bg-gradient-to-br from-[#6d28d9] to-[#4c1d95] rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg">
+          <div className="w-12 h-12 bg-gradient-to-br from-primary-light to-primary rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg">
             V
           </div>
           <div>
-            <h1 className="text-xl font-bold text-[#1e1b4b] tracking-tight">VidyaVani</h1>
-            <p className="text-xs text-[#6d28d9] font-semibold uppercase tracking-widest">AI Radiothon Platform</p>
+            <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">VidyaVani</h1>
+            <p className="text-xs text-primary font-semibold uppercase tracking-widest">AI Radiothon Platform</p>
           </div>
         </div>
       </div>
@@ -66,16 +66,16 @@ const Login = () => {
           transition={{ duration: 0.4 }}
           className="w-full max-w-md"
         >
-          <div className="bg-white rounded-2xl shadow-xl border border-[#e5e7eb] overflow-hidden">
+          <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
             {/* Card header */}
-            <div className="bg-gradient-to-r from-[#6d28d9] to-[#7c3aed] px-8 py-6">
+            <div className="bg-gradient-to-r from-primary to-primary-light px-8 py-6">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-white/10 rounded-lg">
                   <Lock size={20} className="text-white" />
                 </div>
                 <div>
                   <h2 className="text-xl font-bold text-white">Welcome</h2>
-                  <p className="text-[#c4b5fd] text-sm mt-0.5">Sign in to access the dashboard</p>
+                  <p className="text-indigo-200 text-sm mt-0.5">Sign in to access the dashboard</p>
                 </div>
               </div>
             </div>
@@ -93,7 +93,7 @@ const Login = () => {
               )}
 
               <div className="text-center mb-6">
-                <p className="text-sm text-[#6b7280]">
+                <p className="text-sm text-slate-500 dark:text-slate-400">
                   Sign in with your Google account to access the VidyaVani admin dashboard.
                 </p>
               </div>
@@ -104,7 +104,7 @@ const Login = () => {
                 className="w-full flex items-center justify-center gap-3 bg-white hover:bg-[#f9fafb] text-[#374151] font-semibold py-3.5 px-4 rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed border-2 border-[#e5e7eb] hover:border-[#d1d5db] shadow-sm hover:shadow-md"
               >
                 {loading ? (
-                  <div className="w-5 h-5 border-2 border-[#6d28d9]/30 border-t-[#6d28d9] rounded-full animate-spin" />
+                  <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
                 ) : (
                   <>
                     <svg viewBox="0 0 24 24" width="20" height="20">
@@ -118,9 +118,9 @@ const Login = () => {
                 )}
               </button>
 
-              <div className="mt-6 p-4 bg-[#f5f3ff] rounded-xl border border-[#e9e5ff]">
-                <p className="text-xs text-[#6d28d9] font-semibold mb-1">VidyaVani Dashboard</p>
-                <p className="text-xs text-[#6b7280]">
+              <div className="mt-6 p-4 bg-primary/5 dark:bg-primary/10 rounded-xl border border-primary/10">
+                <p className="text-xs text-primary font-semibold mb-1">VidyaVani Dashboard</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
                   Access real-time call analytics, AI-powered insights, and content management tools for the VidyaVani Radiothon platform.
                 </p>
               </div>
@@ -128,14 +128,14 @@ const Login = () => {
           </div>
 
           {/* Footer notice */}
-          <p className="text-center text-xs text-[#9ca3af] mt-6">
+          <p className="text-center text-xs text-slate-400 dark:text-slate-500 mt-6">
             Protected by Government cybersecurity standards.
           </p>
         </motion.div>
       </div>
 
       {/* Bottom bar */}
-      <div className="bg-[#1e1b4b] text-[#a78bfa] text-xs py-3">
+      <div className="bg-primary-dark text-primary-light text-xs py-3">
         <div className="max-w-7xl mx-auto px-4 flex items-center justify-between">
           <span>&copy; {new Date().getFullYear()} VidyaVani AI. All rights reserved.</span>
           <div className="flex items-center gap-4">

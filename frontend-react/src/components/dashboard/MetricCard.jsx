@@ -17,7 +17,7 @@ const MetricCard = React.memo(({ title, value, trend, suffix = '', icon: Icon, c
         success: 'bg-success/10 text-success',
         warning: 'bg-warning/10 text-warning',
         error: 'bg-error/10 text-error',
-        purple: 'bg-purple-500/10 text-purple-600',
+        info: 'bg-sky-500/10 text-sky-600',
     };
 
     return (

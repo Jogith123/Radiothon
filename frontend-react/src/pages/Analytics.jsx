@@ -19,7 +19,7 @@ import { PageHeader, Card } from '../components/common';
 // Motion presets
 import { containerVariants, cardVariants, cardHover, transitions } from '../lib/motion';
 
-const COLORS = ['#6366f1', '#a855f7', '#ec4899', '#14b8a6', '#f59e0b', '#10b981', '#ef4444', '#3b82f6'];
+const COLORS = ['#6366f1', '#14b8a6', '#ec4899', '#0ea5e9', '#f59e0b', '#10b981', '#ef4444', '#3b82f6'];
 const tooltipStyle = { backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#fff' };
 
 // ============================================
@@ -90,7 +90,7 @@ const Analytics = () => {
                             value={summary?.uniqueStudents?.toLocaleString() || '0'}
                             trend={summary?.studentsTrend || '+0%'}
                             icon={Users}
-                            color="purple"
+                            color="blue"
                         />
                         <StatCard
                             title="Avg Q/Student"
@@ -207,7 +207,7 @@ const Analytics = () => {
 const StatCard = React.memo(({ title, value, trend, icon: Icon, color }) => {
     const colorMap = {
         blue: 'bg-blue-500/10 text-blue-500',
-        purple: 'bg-purple-500/10 text-purple-500',
+        indigo: 'bg-indigo-500/10 text-indigo-500',
         orange: 'bg-orange-500/10 text-orange-500',
         green: 'bg-green-500/10 text-green-500',
     };

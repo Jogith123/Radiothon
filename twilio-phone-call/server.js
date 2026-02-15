@@ -984,34 +984,14 @@ async function chapterExplain(callSid, req) {
 
   const twiml = new VoiceResponse();
 
-  // Check if there's a paused explanation to continue
-  if (session.pausedExplanationAudio) {
-    console.log(`▶️ Resuming paused explanation for call: ${callSid}`);
+  // Check if there are paused segments to resume from
+  if (session.explanationSegments && session.explanationSegments.length > 0 && session.currentSegmentIndex !== undefined) {
+    const resumeIndex = session.currentSegmentIndex;
+    console.log(`▶️ Resuming explanation from segment ${resumeIndex + 1}/${session.explanationSegments.length} for call: ${callSid}`);
     addMultilingualPrompt(twiml, 'continueExplanation', selectedLangCode);
 
-    // Play the stored explanation audio with gather for pause (press 8)
-    const gather = twiml.gather({
-      action: `${process.env.BASE_URL}/ivr/menu`,
-      numDigits: '1',
-      method: 'POST',
-      input: 'dtmf'
-    });
-
-    const audioUrl = session.pausedExplanationAudio;
-    gather.play(audioUrl);
-
-    // After audio finishes, offer options
-    const gather2 = twiml.gather({
-      action: `${process.env.BASE_URL}/ivr/menu`,
-      numDigits: '1',
-      method: 'POST',
-      timeout: 10
-    });
-    addMultilingualPrompt(gather2, 'afterChapterExplain', selectedLangCode, { loop: 2 });
-
-    // Clear the paused state
-    session.pausedExplanationAudio = null;
-    userSessions.set(callSid, session);
+    // Redirect to segment playback endpoint to play from the current segment
+    twiml.redirect(`${process.env.BASE_URL}/ivr/chapter-segment?index=${resumeIndex}`);
 
     return twiml.toString();
   }
@@ -1170,32 +1150,36 @@ app.post('/ivr/chapter-recorded', async (req, res) => {
       }
     }
 
-    // Convert to speech
-    const audioFileName = await textToSpeechConvert(
-      explanationInUserLang,
-      callSid,
-      selectedLangCode
-    );
+    // Convert to speech - split into segments for pause/resume support
+    // Split text into segments (~3-5 segments based on sentence boundaries)
+    const segments = splitIntoSegments(explanationInUserLang, 4);
+    console.log(`📖 Split explanation into ${segments.length} segments for pause/resume`);
 
-    if (audioFileName) {
-      const audioUrl = `${process.env.BASE_URL}/audio/${audioFileName}`;
-      console.log(`▶️ Playing chapter explanation: ${audioUrl}`);
+    const segmentAudioUrls = [];
+    for (let i = 0; i < segments.length; i++) {
+      const audioFileName = await textToSpeechConvert(
+        segments[i],
+        `${callSid}_seg${i}`,
+        selectedLangCode
+      );
+      if (audioFileName) {
+        segmentAudioUrls.push(`${process.env.BASE_URL}/audio/${audioFileName}`);
+      }
+    }
 
-      // Store audio URL in session for pause/resume
-      session.pausedExplanationAudio = audioUrl;
+    if (segmentAudioUrls.length > 0) {
+      console.log(`▶️ Generated ${segmentAudioUrls.length} audio segments`);
+
+      // Store segments in session for pause/resume
+      session.explanationSegments = segmentAudioUrls;
+      session.currentSegmentIndex = 0;
       session.lastChapterExplanation = explanation;
       userSessions.set(callSid, session);
 
-      // Play with gather so user can press 8 to pause
-      const gather = twiml.gather({
-        action: `${process.env.BASE_URL}/ivr/menu`,
-        numDigits: '1',
-        method: 'POST',
-        input: 'dtmf'
-      });
-      gather.play(audioUrl);
+      // Redirect to segment playback which handles sequential play
+      twiml.redirect(`${process.env.BASE_URL}/ivr/chapter-segment?index=0`);
     } else {
-      // Fallback to Twilio TTS
+      // Fallback to Twilio TTS (no segment support)
       const gather = twiml.gather({
         action: `${process.env.BASE_URL}/ivr/menu`,
         numDigits: '1',
@@ -1203,16 +1187,16 @@ app.post('/ivr/chapter-recorded', async (req, res) => {
         input: 'dtmf'
       });
       gather.say(explanation, { voice: 'Polly.Joanna', language: 'en-US' });
-    }
 
-    // After explanation, offer options
-    const gather2 = twiml.gather({
-      action: `${process.env.BASE_URL}/ivr/menu`,
-      numDigits: '1',
-      method: 'POST',
-      timeout: 10
-    });
-    addMultilingualPrompt(gather2, 'afterChapterExplain', selectedLangCode, { loop: 2 });
+      // After explanation, offer options
+      const gather2 = twiml.gather({
+        action: `${process.env.BASE_URL}/ivr/menu`,
+        numDigits: '1',
+        method: 'POST',
+        timeout: 10
+      });
+      addMultilingualPrompt(gather2, 'afterChapterExplain', selectedLangCode, { loop: 2 });
+    }
 
   } catch (error) {
     console.error('❌ Error processing chapter request:', error);
@@ -1224,13 +1208,104 @@ app.post('/ivr/chapter-recorded', async (req, res) => {
   res.send(twiml.toString());
 });
 
-// Pause explanation (Option 8) - stops audio playback, lets user take notes
+// ============================================
+// SEGMENT PLAYBACK FOR PAUSE/RESUME
+// ============================================
+
+/**
+ * Split text into roughly equal segments by sentence boundaries.
+ * Each segment contains multiple sentences to create meaningful chunks.
+ */
+function splitIntoSegments(text, targetSegments = 4) {
+  // Split by sentence-ending punctuation, keeping the delimiter
+  const sentences = text.match(/[^.!?।]+[.!?।]+/g) || [text];
+  
+  if (sentences.length <= targetSegments) {
+    // If fewer sentences than target segments, each sentence is a segment
+    return sentences.map(s => s.trim()).filter(s => s.length > 0);
+  }
+
+  // Distribute sentences roughly evenly across segments
+  const segmentSize = Math.ceil(sentences.length / targetSegments);
+  const segments = [];
+  
+  for (let i = 0; i < sentences.length; i += segmentSize) {
+    const chunk = sentences.slice(i, i + segmentSize).join(' ').trim();
+    if (chunk.length > 0) {
+      segments.push(chunk);
+    }
+  }
+
+  return segments;
+}
+
+/**
+ * Endpoint to play a specific segment of a chapter explanation.
+ * Plays segment at ?index=N, then chains to next segment or offers options.
+ * User can press 8 to pause at any time during playback.
+ */
+app.post('/ivr/chapter-segment', (req, res) => {
+  const callSid = req.body.CallSid;
+  const segmentIndex = parseInt(req.query.index || '0', 10);
+  const session = userSessions.get(callSid) || {};
+  const selectedLangCode = session.selectedLanguage || 'en-US';
+  const segments = session.explanationSegments || [];
+
+  const twiml = new VoiceResponse();
+
+  if (segmentIndex >= segments.length || segments.length === 0) {
+    // All segments played - offer options
+    console.log(`✅ All ${segments.length} segments played for call: ${callSid}`);
+    
+    // Clear segment data
+    session.explanationSegments = null;
+    session.currentSegmentIndex = undefined;
+    userSessions.set(callSid, session);
+
+    const gather = twiml.gather({
+      action: `${process.env.BASE_URL}/ivr/menu`,
+      numDigits: '1',
+      method: 'POST',
+      timeout: 10
+    });
+    addMultilingualPrompt(gather, 'afterChapterExplain', selectedLangCode, { loop: 2 });
+  } else {
+    // Play current segment with gather for pause (press 8)
+    console.log(`▶️ Playing segment ${segmentIndex + 1}/${segments.length} for call: ${callSid}`);
+    
+    // Update current segment index BEFORE playing
+    session.currentSegmentIndex = segmentIndex;
+    userSessions.set(callSid, session);
+
+    const gather = twiml.gather({
+      action: `${process.env.BASE_URL}/ivr/menu`,
+      numDigits: '1',
+      method: 'POST',
+      input: 'dtmf'
+    });
+    gather.play(segments[segmentIndex]);
+
+    // When this segment finishes (no DTMF pressed), advance to next segment
+    twiml.redirect(`${process.env.BASE_URL}/ivr/chapter-segment?index=${segmentIndex + 1}`);
+  }
+
+  res.type('text/xml');
+  res.send(twiml.toString());
+});
+
+// Pause explanation (Option 8) - stops audio playback, saves segment position
 function pauseExplanation(callSid, req) {
   console.log(`⏸️ Pausing explanation for call: ${callSid}`);
   const session = userSessions.get(callSid) || {};
   const selectedLangCode = session.selectedLanguage || 'en-US';
 
   const twiml = new VoiceResponse();
+
+  // The segment index is already saved - when user pressed 8 during a gather,
+  // the gather stops and currentSegmentIndex reflects where they were
+  const segIdx = session.currentSegmentIndex || 0;
+  const totalSegs = session.explanationSegments?.length || 0;
+  console.log(`⏸️ Paused at segment ${segIdx + 1}/${totalSegs}`);
 
   // Tell user it's paused and they can take notes
   addMultilingualPrompt(twiml, 'pausedExplanation', selectedLangCode);

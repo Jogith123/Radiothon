@@ -6,20 +6,17 @@
 import React, { useState, useEffect } from 'react';
 import { Phone, PhoneOff, Mic, MicOff, Volume2, VolumeX, Delete, Signal, Battery, GraduationCap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useCallSession } from '../../hooks/api/useCallSession';
 
 const PhoneSimulator = () => {
     const [activeCall, setActiveCall] = useState(false);
     const [dialedNumber, setDialedNumber] = useState('');
     const [callDuration, setCallDuration] = useState(0);
     const [currentTime, setCurrentTime] = useState('');
-    // TODO: isMuted and isSpeaker are visual indicators for now. 
-    // In a real implementation, these would control audio streams via WebRTC or Twilio SDK.
     const [isMuted, setIsMuted] = useState(false);
     const [isSpeaker, setIsSpeaker] = useState(false);
     const [callStatus, setCallStatus] = useState('Ready');
 
-    const { startCall, endCall, sendDtmf } = useCallSession();
+    const { startCall, endCall, sendDtmf } = { startCall: {}, endCall: {}, sendDtmf: {} };
 
     // Update current time every second
     useEffect(() => {
@@ -52,40 +49,18 @@ const PhoneSimulator = () => {
     const handleCall = async () => {
         if (!activeCall) {
             if (dialedNumber.length === 0) return;
-
             setActiveCall(true);
             setCallStatus('Calling...');
-
-            try {
-                setTimeout(async () => {
-                    try {
-                        await startCall.mutateAsync(dialedNumber);
-                        setCallStatus('Connected');
-                    } catch (e) {
-                        console.error('Backend call failed:', e.message);
-                        setCallStatus('Backend unavailable');
-                        setTimeout(() => {
-                            setActiveCall(false);
-                            setCallStatus('Ready');
-                        }, 3000);
-                    }
-                }, 1500);
-            } catch (err) {
-                console.error('Call initiation error:', err);
-                setCallStatus('Failed');
-                setTimeout(() => setActiveCall(false), 2000);
-            }
+            // Simulate connection delay
+            setTimeout(() => setCallStatus('Connected'), 1500);
         } else {
             setCallStatus('Ending...');
-            try { await endCall.mutateAsync(); } catch (e) { console.error('End call error:', e); }
-
-            setCallStatus('Ended');
             setTimeout(() => {
                 setActiveCall(false);
                 setCallDuration(0);
                 setDialedNumber('');
                 setCallStatus('Ready');
-            }, 1500);
+            }, 1000);
         }
     };
 
@@ -94,7 +69,6 @@ const PhoneSimulator = () => {
             setDialedNumber(prev => (prev + digit).slice(0, 15));
         } else {
             console.log(`DTMF: ${digit}`);
-            try { await sendDtmf.mutateAsync(digit); } catch (e) { console.error('DTMF send error:', e); }
         }
     };
 

@@ -55,7 +55,7 @@ const Sidebar = () => {
                         />
                         <span className="text-xs font-semibold text-primary dark:text-primary-light">System Operational</span>
                     </div>
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400">v2.4.0-stable</p>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">v2.5.0</p>
                 </div>
             </div>
 

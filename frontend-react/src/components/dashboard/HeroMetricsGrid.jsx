@@ -68,7 +68,7 @@ const HeroMetricsGrid = () => {
                 value={metrics.activeSessions?.toString() || "0"}
                 trend={trends.sessions}
                 icon={Users}
-                color="purple"
+                color="info"
             />
         </div>
     );

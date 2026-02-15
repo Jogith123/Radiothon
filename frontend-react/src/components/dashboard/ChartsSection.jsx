@@ -66,10 +66,10 @@ const ChartsSection = React.memo(() => {
                                         <stop offset="95%" stopColor="#1a237e" stopOpacity={0} />
                                     </linearGradient>
                                 </defs>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} className="[&_line]:stroke-slate-200 dark:[&_line]:stroke-slate-700" />
                                 <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8' }} />
                                 <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8' }} />
-                                <Tooltip contentStyle={{ backgroundColor: 'white', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
                                 <Area type="monotone" dataKey="calls" stroke="#1a237e" fillOpacity={1} fill="url(#colorCalls)" name="Calls" />
                             </AreaChart>
                         </ResponsiveContainer>

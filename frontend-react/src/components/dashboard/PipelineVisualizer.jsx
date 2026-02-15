@@ -12,7 +12,7 @@ import { cardVariants, stageVariants, transitions } from '../../lib/motion';
 const stages = [
     { id: 'recording', label: 'Recording', icon: Mic, color: 'text-red-500' },
     { id: 'stt', label: 'Speech to Text', icon: FileText, color: 'text-blue-500' },
-    { id: 'rag', label: 'RAG Retrieval', icon: Database, color: 'text-purple-500' },
+    { id: 'rag', label: 'RAG Retrieval', icon: Database, color: 'text-indigo-500' },
     { id: 'llm', label: 'AI Processing', icon: Cpu, color: 'text-amber-500' },
     { id: 'tts', label: 'Text to Speech', icon: Speaker, color: 'text-green-500' },
     { id: 'delivery', label: 'Delivery', icon: Send, color: 'text-teal-500' },
