@@ -530,12 +530,15 @@ async function getAnswer(callSid, req) {
   }
 
   try {
+    console.log(`🔍 Step 1: Checking AI provider availability...`);
     // Check if any AI provider is available
     if (!aiProviderService.isAnyProviderInitialized()) {
+      console.error(`❌ AI provider not available`);
       addMultilingualPrompt(twiml, 'aiServiceError', selectedLangCode);
       twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
       return twiml.toString();
     }
+    console.log(`✅ AI provider is available: ${aiProviderService.getActiveProvider()}`);
 
     // Get answer from AI provider (in English)
     let answer = '';
@@ -548,10 +551,10 @@ async function getAnswer(callSid, req) {
       voiceConfig
     );
 
-    console.log(`🤖 Sending to AI (${aiProviderService.getActiveProvider()}): ${question}`);
+    console.log(`🔍 Step 2: Sending question to AI (${aiProviderService.getActiveProvider()}): ${question}`);
     const answerEnglish = await aiProviderService.generateAnswer(question);
 
-    console.log(`🤖 Answer (English): ${answerEnglish}`);
+    console.log(`✅ Step 2 Complete - Answer (English): ${answerEnglish}`);
 
     // Broadcast answer generated (non-blocking)
     try {
@@ -561,38 +564,43 @@ async function getAnswer(callSid, req) {
     }
 
     // Get user's language from session
-    cotry {
+    const questionLanguage = session.questionLanguage || 'en';
+    const detectedLanguageCode = session.detectedLanguageCode || 'en-US';
+
+    console.log(`🔍 Step 3: Language Info - Detected="${detectedLanguageCode}", Code="${questionLanguage}"`);
+
+    // Translate answer back to user's language if needed
+    let answerInUserLanguage = answerEnglish;
+    if (questionLanguage !== 'en') {
+      console.log(`🔍 Step 4: Translating answer: English → ${questionLanguage}...`);
+      try {
         const translationPromise = translateText(answerEnglish, questionLanguage, 'en');
         const timeoutPromise = new Promise((_, reject) => 
           setTimeout(() => reject(new Error('Translation timeout')), 10000)
         );
         answerInUserLanguage = await Promise.race([translationPromise, timeoutPromise]);
-        console.log(`📝 Answer (${questionLanguage}): ${answerInUserLanguage}`);
+        console.log(`✅ Step 4 Complete - Answer (${questionLanguage}): ${answerInUserLanguage}`);
       } catch (error) {
-        console.error(`⚠️ Answer translation failed (${error.message}), using English`);
+        console.error(`❌ Step 4 Failed - Answer translation failed (${error.message}), using English`);
         answerInUserLanguage = answerEnglish; // Fallback to English
       }
-
-    console.log(`🌐 Language Info: Detected="${detectedLanguageCode}", Code="${questionLanguage}"`);
-
-    // Translate answer back to user's language if needed
-    let answerInUserLanguage = answerEnglish;
-    if (questionLanguage !== 'en') {
-      console.log(`🌐 Translating answer: English → ${questionLanguage}...`);
-      answerInUserLanguage = await translateText(answerEnglish, questionLanguage, 'en');
-      console.log(`📝 Answer (${questionLanguage}): ${answerInUserLanguage}`);
     } else {
-      console.log(`✅ Answer is already in English, no translation needed`);
+      console.log(`✅ Step 4 Skipped - Answer is already in English, no translation needed`);
     }
 
+    console.log(`🔍 Step 5: Storing answer in session...`);
     // Store answer in session
     session.lastAnswer = answerEnglish;              // English version
     session.lastAnswerTranslated = answerInUserLanguage;  // User's language
     userSessions.set(callSid, session);
+    console.log(`✅ Step 5 Complete - Answer stored in session`);
 
+    console.log(`🔍 Step 6: Checking database connectivity...`);
     // Classify and store (using English question and answer)
     if (isConnected()) {
+      console.log(`🔍 Step 6a: Storing Q&A in database...`);
       await storeQuestionAndAnswer(session.fromNumber, question, answerEnglish);
+      console.log(`✅ Step 6a Complete - Q&A stored in database`);
 
       // Broadcast Q&A saved (non-blocking)
       try {
@@ -607,27 +615,32 @@ async function getAnswer(callSid, req) {
       } catch (error) {
         // Silent fail
       }
+    } else {
+      console.log(`⚠️ Step 6 Skipped - Database not connected`);
     }
 
+    console.log(`🔍 Step 7: Converting to speech: Language="${detectedLanguageCode}"`);
     // Convert translated answer to speech in user's language
-    console.log(`🎤 Converting to speech: Language="${detectedLanguageCode}"`);
     const audioFileName = await textToSpeechConvert(
       answerInUserLanguage,
       callSid,
       detectedLanguageCode  // Use full language code (e.g., 'te-IN')
     );
+    console.log(`✅ Step 7 Complete - Audio file: ${audioFileName}`);
 
+    console.log(`🔍 Step 8: Preparing TwiML response...`);
     if (audioFileName) {
       // Play the generated audio in user's language
       const audioUrl = `${process.env.BASE_URL}/audio/${audioFileName}`;
-      console.log(`▶️ Playing audio in ${detectedLanguageCode}: ${audioUrl}`);
+      console.log(`▶️ Step 8a: Playing audio in ${detectedLanguageCode}: ${audioUrl}`);
       twiml.play(audioUrl);
     } else {
       // Fallback to Twilio's TTS
-      console.log(`⚠️ Using Twilio TTS fallback in English`);
+      console.log(`⚠️ Step 8b: Using Twilio TTS fallback in English`);
       twiml.say(answerEnglish, { voice: 'Polly.Joanna', language: 'en-US' });
     }
 
+    console.log(`🔍 Step 9: Adding menu options...`);
     // Offer next options
     const gather = twiml.gather({
       action: `${process.env.BASE_URL}/ivr/menu`,
@@ -641,8 +654,12 @@ async function getAnswer(callSid, req) {
       voiceConfig
     );
 
+    console.log(`✅ All steps completed successfully!`);
+
   } catch (error) {
-    console.error('Error getting answer from AI:', error);
+    console.error(`❌ ERROR in getAnswer - Step failed:`, error);
+    console.error(`❌ Error message: ${error.message}`);
+    console.error(`❌ Error stack: ${error.stack}`);
     addMultilingualPrompt(twiml, 'generalError', selectedLangCode);
     twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
   }
