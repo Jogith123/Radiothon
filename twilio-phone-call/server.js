@@ -529,118 +529,133 @@ async function getAnswer(callSid, req) {
     return twiml.toString();
   }
 
+  // Check if any AI provider is available
+  if (!aiProviderService.isAnyProviderInitialized()) {
+    console.error(`❌ AI provider not available`);
+    addMultilingualPrompt(twiml, 'aiServiceError', selectedLangCode);
+    twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
+    return twiml.toString();
+  }
+
+  // Start answer generation in background (AI + translate + TTS)
+  // This avoids Twilio's 15-second webhook timeout
+  console.log(`🚀 Starting background answer generation for ${callSid}...`);
+  session.state = 'generating_answer';
+  userSessions.set(callSid, session);
+
+  generateAnswerInBackground(callSid).catch(err => {
+    console.error(`❌ Background answer generation failed for ${callSid}:`, err.message);
+  });
+
+  // Immediately respond with "processing" message + redirect to polling
+  addMultilingualPrompt(twiml, 'processingQuestion', selectedLangCode);
+  twiml.redirect(`${process.env.BASE_URL}/ivr/answer-poll`);
+  return twiml.toString();
+}
+
+// Background answer generation - runs async, stores result in session
+async function generateAnswerInBackground(callSid) {
   try {
-    console.log(`🔍 Step 1: Checking AI provider availability...`);
-    // Check if any AI provider is available
-    if (!aiProviderService.isAnyProviderInitialized()) {
-      console.error(`❌ AI provider not available`);
-      addMultilingualPrompt(twiml, 'aiServiceError', selectedLangCode);
-      twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
-      return twiml.toString();
-    }
-    console.log(`✅ AI provider is available: ${aiProviderService.getActiveProvider()}`);
-
-    // Get answer from AI provider (in English)
-    let answer = '';
-
-    // Get the question from session
-    // const question = session.currentQuestion; // This line is already present above, no need to duplicate.
-
-    twiml.say(
-      getPrompt('processingQuestion', selectedLangCode),
-      voiceConfig
-    );
-
-    console.log(`🔍 Step 2: Sending question to AI (${aiProviderService.getActiveProvider()}): ${question}`);
-    const answerEnglish = await aiProviderService.generateAnswer(question);
-
-    console.log(`✅ Step 2 Complete - Answer (English): ${answerEnglish}`);
-
-    // Broadcast answer generated (non-blocking)
-    try {
-      broadcastAnswerGenerated(callSid, answerEnglish, 'General'); // Subject will be classified later
-    } catch (error) {
-      // Silent fail
-    }
-
-    // Get user's language from session
+    const session = userSessions.get(callSid) || {};
+    const question = session.currentQuestion;
     const questionLanguage = session.questionLanguage || 'en';
     const detectedLanguageCode = session.detectedLanguageCode || 'en-US';
 
-    console.log(`🔍 Step 3: Language Info - Detected="${detectedLanguageCode}", Code="${questionLanguage}"`);
+    console.log(`🔍 [BG] Step 1: Generating AI answer for "${question}"...`);
+    const answerEnglish = await aiProviderService.generateAnswer(question);
+    console.log(`✅ [BG] Step 1 Complete - AI answer received (${answerEnglish.length} chars)`);
 
-    // Translate answer back to user's language if needed
+    // Translate answer to user's language if needed
     let answerInUserLanguage = answerEnglish;
     if (questionLanguage !== 'en') {
-      console.log(`🔍 Step 4: Translating answer: English → ${questionLanguage}...`);
+      console.log(`🔍 [BG] Step 2: Translating answer English → ${questionLanguage}...`);
       try {
-        const translationPromise = translateText(answerEnglish, questionLanguage, 'en');
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Translation timeout')), 10000)
-        );
-        answerInUserLanguage = await Promise.race([translationPromise, timeoutPromise]);
-        console.log(`✅ Step 4 Complete - Answer (${questionLanguage}): ${answerInUserLanguage}`);
+        answerInUserLanguage = await Promise.race([
+          translateText(answerEnglish, questionLanguage, 'en'),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Translation timeout')), 10000))
+        ]);
+        console.log(`✅ [BG] Step 2 Complete - Translated to ${questionLanguage}`);
       } catch (error) {
-        console.error(`❌ Step 4 Failed - Answer translation failed (${error.message}), using English`);
-        answerInUserLanguage = answerEnglish; // Fallback to English
+        console.error(`⚠️ [BG] Step 2 Failed - Translation error (${error.message}), using English`);
+        answerInUserLanguage = answerEnglish;
       }
-    } else {
-      console.log(`✅ Step 4 Skipped - Answer is already in English, no translation needed`);
     }
 
-    console.log(`🔍 Step 5: Storing answer in session...`);
-    // Store answer in session
-    session.lastAnswer = answerEnglish;              // English version
-    session.lastAnswerTranslated = answerInUserLanguage;  // User's language
-    userSessions.set(callSid, session);
-    console.log(`✅ Step 5 Complete - Answer stored in session`);
+    // Convert to speech
+    console.log(`🔍 [BG] Step 3: Converting to speech (${detectedLanguageCode})...`);
+    const audioFileName = await textToSpeechConvert(answerInUserLanguage, callSid, detectedLanguageCode);
+    console.log(`✅ [BG] Step 3 Complete - Audio file: ${audioFileName}`);
 
-    console.log(`🔍 Step 6: Checking database connectivity...`);
-    // Classify and store (using English question and answer)
+    // Store results in session
+    const updatedSession = userSessions.get(callSid) || session;
+    updatedSession.lastAnswer = answerEnglish;
+    updatedSession.lastAnswerTranslated = answerInUserLanguage;
+    updatedSession.answerAudioFile = audioFileName;
+    updatedSession.answerEnglish = answerEnglish;
+    updatedSession.state = 'answer_ready';
+    userSessions.set(callSid, updatedSession);
+    console.log(`✅ [BG] Answer fully prepared for ${callSid}`);
+
+    // Store in DB (non-blocking) - runs in parallel, doesn't block answer delivery
     if (isConnected()) {
-      console.log(`🔍 Step 6a: Storing Q&A in database...`);
-      await storeQuestionAndAnswer(session.fromNumber, question, answerEnglish);
-      console.log(`✅ Step 6a Complete - Q&A stored in database`);
-
-      // Broadcast Q&A saved (non-blocking)
-      try {
-        broadcastQASaved({
-          callSid,
-          fromNumber: session.fromNumber,
-          question,
-          answer: answerEnglish.substring(0, 200),
-          language: detectedLanguageCode,
-          subject: 'Unknown' // Will be classified in storeQuestionAndAnswer
-        });
-      } catch (error) {
-        // Silent fail
-      }
-    } else {
-      console.log(`⚠️ Step 6 Skipped - Database not connected`);
+      storeQuestionAndAnswer(updatedSession.fromNumber, question, answerEnglish).then(() => {
+        console.log(`✅ [BG] Q&A stored in database`);
+      }).catch(err => {
+        console.error(`⚠️ [BG] Failed to store Q&A: ${err.message}`);
+      });
     }
 
-    console.log(`🔍 Step 7: Converting to speech: Language="${detectedLanguageCode}"`);
-    // Convert translated answer to speech in user's language
-    const audioFileName = await textToSpeechConvert(
-      answerInUserLanguage,
-      callSid,
-      detectedLanguageCode  // Use full language code (e.g., 'te-IN')
-    );
-    console.log(`✅ Step 7 Complete - Audio file: ${audioFileName}`);
+    // Broadcast (non-blocking)
+    try {
+      broadcastAnswerGenerated(callSid, answerEnglish, 'General');
+    } catch (e) { /* silent */ }
 
-    console.log(`🔍 Step 8: Preparing TwiML response...`);
-    if (audioFileName) {
-      // Play the generated audio in user's language
-      const audioUrl = `${process.env.BASE_URL}/audio/${audioFileName}`;
-      console.log(`▶️ Step 8a: Playing audio in ${detectedLanguageCode}: ${audioUrl}`);
+  } catch (error) {
+    console.error(`❌ [BG] Answer generation failed for ${callSid}:`, error.message);
+    console.error(`❌ [BG] Stack:`, error.stack);
+    const session = userSessions.get(callSid) || {};
+    session.answerError = error.message;
+    session.state = 'answer_error';
+    userSessions.set(callSid, session);
+  }
+}
+
+// Polling endpoint - checks if background answer is ready
+app.post('/ivr/answer-poll', async (req, res) => {
+  const callSid = req.body.CallSid;
+  const session = userSessions.get(callSid) || {};
+  const selectedLangCode = session.selectedLanguage || 'en-US';
+  const voiceConfig = getVoiceConfig(selectedLangCode);
+  const twiml = new VoiceResponse();
+
+  console.log(`🔄 Polling answer for ${callSid} - State: ${session.state}`);
+
+  if (session.state === 'answer_ready') {
+    // Answer is ready! Play it
+    console.log(`✅ Answer ready for ${callSid}, delivering to caller`);
+
+    if (session.answerAudioFile) {
+      const audioUrl = `${process.env.BASE_URL}/audio/${session.answerAudioFile}`;
+      console.log(`▶️ Playing audio: ${audioUrl}`);
       twiml.play(audioUrl);
-    } else {
+    } else if (session.answerEnglish) {
       // Fallback to Twilio's TTS
-      console.log(`⚠️ Step 8b: Using Twilio TTS fallback in English`);
-      twiml.say(answerEnglish, { voice: 'Polly.Joanna', language: 'en-US' });
+      console.log(`⚠️ No audio file, using Twilio TTS fallback`);
+      twiml.say(session.answerEnglish, { voice: 'Polly.Joanna', language: 'en-US' });
     }
 
-    console.log(`🔍 Step 9: Adding menu options...`);
+    // Broadcast Q&A saved (non-blocking)
+    try {
+      broadcastQASaved({
+        callSid,
+        fromNumber: session.fromNumber,
+        question: session.currentQuestion,
+        answer: (session.lastAnswer || '').substring(0, 200),
+        language: session.detectedLanguageCode || 'en-US',
+        subject: 'Unknown'
+      });
+    } catch (e) { /* silent */ }
+
     // Offer next options
     const gather = twiml.gather({
       action: `${process.env.BASE_URL}/ivr/menu`,
@@ -648,24 +663,24 @@ async function getAnswer(callSid, req) {
       method: 'POST',
       timeout: 10
     });
+    gather.say(getPrompt('afterAnswer', selectedLangCode), voiceConfig);
 
-    gather.say(
-      getPrompt('afterAnswer', selectedLangCode),
-      voiceConfig
-    );
-
-    console.log(`✅ All steps completed successfully!`);
-
-  } catch (error) {
-    console.error(`❌ ERROR in getAnswer - Step failed:`, error);
-    console.error(`❌ Error message: ${error.message}`);
-    console.error(`❌ Error stack: ${error.stack}`);
+  } else if (session.state === 'answer_error') {
+    // Answer generation failed
+    console.error(`❌ Answer error for ${callSid}: ${session.answerError}`);
     addMultilingualPrompt(twiml, 'generalError', selectedLangCode);
     twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
+
+  } else {
+    // Still processing - wait and check again
+    console.log(`⏳ Answer still generating for ${callSid}, waiting 3 seconds...`);
+    twiml.pause({ length: 3 });
+    twiml.redirect(`${process.env.BASE_URL}/ivr/answer-poll`);
   }
 
-  return twiml.toString();
-}
+  res.type('text/xml');
+  res.send(twiml.toString());
+});
 
 // Get summary of last 5 questions for a subject
 async function getSummary(callSid, req) {
