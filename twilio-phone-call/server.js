@@ -1618,11 +1618,45 @@ app.post('/api/rag/upload', upload.single('file'), async (req, res) => {
 
     // Parse based on file type
     if (ext === 'pdf') {
-      // Use pdf-parse for proper PDF text extraction
-      const pdfParse = require('pdf-parse');
-      const pdfData = await pdfParse(req.file.buffer);
-      content = pdfData.text;
-      console.log(`📄 PDF parsed: ${fileName} - ${pdfData.numpages} pages, ${content.length} chars`);
+      // Use pdf2json for PDF text extraction (Node.js native, no DOM dependencies)
+      const PDFParser = require('pdf2json');
+      const pdfParser = new PDFParser();
+
+      // Parse PDF buffer
+      content = await new Promise((resolve, reject) => {
+        let textContent = '';
+
+        pdfParser.on('pdfParser_dataError', errData => {
+          reject(new Error(errData.parserError));
+        });
+
+        pdfParser.on('pdfParser_dataReady', pdfData => {
+          try {
+            // Extract text from all pages
+            const pages = pdfData.Pages || [];
+            for (const page of pages) {
+              const texts = page.Texts || [];
+              for (const text of texts) {
+                const textRuns = text.R || [];
+                for (const run of textRuns) {
+                  if (run.T) {
+                    // Decode URI-encoded text
+                    textContent += decodeURIComponent(run.T) + ' ';
+                  }
+                }
+              }
+              textContent += '\n\n'; // Add paragraph break between pages
+            }
+            resolve(textContent.trim());
+          } catch (err) {
+            reject(err);
+          }
+        });
+
+        pdfParser.parseBuffer(req.file.buffer);
+      });
+
+      console.log(`📄 PDF parsed: ${fileName} - ${content.length} chars`);
     } else {
       // Plain text files (txt, md, csv, docx)
       content = req.file.buffer.toString('utf-8');
