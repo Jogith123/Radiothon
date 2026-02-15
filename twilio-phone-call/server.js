@@ -57,6 +57,9 @@ async function initializeServices() {
   // Initialize MongoDB
   await connectToMongoDB();
 
+  // Initialize metrics from today's database records
+  await initializeMetricsFromDB();
+
   // Initialize RAG embedding model for vector search
   const { initializeEmbeddings } = require('./services/ragService');
   initializeEmbeddings();
@@ -212,6 +215,37 @@ function startMetricsBroadcast() {
       console.error('Error broadcasting metrics:', error.message);
     }
   }, 10000); // 10 seconds
+}
+
+// Initialize metrics from database
+async function initializeMetricsFromDB() {
+  try {
+    if (!isConnected()) {
+      console.log('⚠️  Database not connected - metrics will start from 0');
+      return;
+    }
+    
+    const History = require('./models/History');
+    const collection = History.getCollection();
+    
+    if (!collection) {
+      console.log('⚠️  Cannot access History collection - metrics will start from 0');
+      return;
+    }
+    
+    // Count calls from today (midnight to now)
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    
+    const todayCount = await collection.countDocuments({
+      timestamp: { $gte: startOfToday }
+    });
+    
+    callMetrics.totalCallsToday = todayCount;
+    console.log(`📊 Loaded ${todayCount} calls from today's database records`);
+  } catch (error) {
+    console.error('⚠️  Error initializing metrics from DB:', error.message);
+  }
 }
 
 // ============================================
