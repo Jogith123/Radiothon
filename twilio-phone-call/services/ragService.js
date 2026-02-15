@@ -27,8 +27,8 @@ function initializeEmbeddings() {
   try {
     if (process.env.GEMINI_API_KEY) {
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-      embeddingModel = genAI.getGenerativeModel({ model: 'text-embedding-004' });
-      console.log('✅ Gemini embedding model initialized (text-embedding-004)');
+      embeddingModel = genAI.getGenerativeModel({ model: 'embedding-001' });
+      console.log('✅ Gemini embedding model initialized (embedding-001)');
       return true;
     }
     console.log('⚠️  GEMINI_API_KEY not found - embeddings disabled');
