@@ -55,7 +55,7 @@ async function generateAnswer(question) {
     throw new Error('Gemini AI not initialized');
   }
 
-  const prompt = `You are an educational assistant. Answer this question clearly and concisely in 2-3 sentences suitable for voice response: ${question}`;
+  const prompt = `You are an educational assistant. Answer this question clearly and concisely in 2-3 sentences suitable for voice response. Do NOT use any markdown formatting like **, *, #, or bullet points - respond in plain text only: ${question}`;
 
   const result = await model.generateContent(prompt);
   const response = await result.response;
@@ -164,8 +164,9 @@ Instructions:
 2. Focus on the content that directly relates to the user's request.
 3. Provide a clear, detailed explanation that's easy to understand for a student.
 4. Keep the explanation suitable for voice response (clear, conversational, well-structured).
-5. If the relevant sections don't fully cover the topic, explain what's available and mention that.
-6. Keep the explanation under 500 words so it's not too long for voice playback.
+5. Do NOT use any markdown formatting like **, *, #, bullet points, or numbered lists - respond in plain text only.
+6. If the relevant sections don't fully cover the topic, explain what's available and mention that.
+7. Keep the explanation under 500 words so it's not too long for voice playback.
 
 Explain:`;
 

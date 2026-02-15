@@ -68,28 +68,6 @@ async function initializeServices() {
 }
 
 /**
- * Strip markdown formatting from AI output before sending to TTS
- * Removes **, *, #, -, _ etc. that TTS reads as "asterisk asterisk"
- */
-function stripMarkdown(text) {
-  if (!text) return text;
-  return text
-    .replace(/\*\*(.+?)\*\*/g, '$1')   // **bold** → bold
-    .replace(/\*(.+?)\*/g, '$1')       // *italic* → italic
-    .replace(/__(.+?)__/g, '$1')       // __underline__ → underline
-    .replace(/_(.+?)_/g, '$1')         // _italic_ → italic
-    .replace(/#{1,6}\s*/g, '')         // ### heading → heading
-    .replace(/```[\s\S]*?```/g, '')    // ```code blocks``` → remove
-    .replace(/`(.+?)`/g, '$1')        // `inline code` → inline code
-    .replace(/^\s*[-*+]\s+/gm, '')    // - bullet points → remove dash
-    .replace(/^\s*\d+\.\s+/gm, '')    // 1. numbered lists → remove number
-    .replace(/\[(.+?)\]\(.+?\)/g, '$1') // [link](url) → link
-    .replace(/>\s*/g, '')              // > blockquote → remove
-    .replace(/\n{3,}/g, '\n\n')       // Multiple newlines → double newline
-    .trim();
-}
-
-/**
  * Helper function to add multilingual prompt to TwiML
  * For Telugu and Tamil: uses pre-generated audio files
  * For English and Hindi: uses Polly TTS
@@ -270,7 +248,6 @@ app.post('/ivr/menu', async (req, res) => {
     return;
   }
 
-  // Base options available in all languages
   const optionActions = {
     '1': askQuestion,
     '2': stopRecording,
@@ -526,7 +503,7 @@ app.post('/ivr/transcription', async (req, res) => {
   res.sendStatus(200);
 });
 
-// Get answer from Gemini AI — matches chapterExplain flow (no artificial timeout)
+// Get answer from Gemini AI
 async function getAnswer(callSid, req) {
   console.log(`🤖 Getting answer for call: ${callSid}`);
   const session = userSessions.get(callSid) || {};
@@ -541,14 +518,14 @@ async function getAnswer(callSid, req) {
   if (session.state === 'processing_transcription') {
     console.log(`⏳ Transcription still processing for call: ${callSid}`);
     addMultilingualPrompt(twiml, 'stillProcessing', selectedLangCode);
-    twiml.redirect(`${process.env.BASE_URL}/ivr/menu`);
+    twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
     return twiml.toString();
   }
 
   if (!question) {
     console.log(`⚠️  No question found for call: ${callSid}`);
     addMultilingualPrompt(twiml, 'noQuestion', selectedLangCode);
-    twiml.redirect(`${process.env.BASE_URL}/ivr/menu`);
+    twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
     return twiml.toString();
   }
 
@@ -556,49 +533,32 @@ async function getAnswer(callSid, req) {
     // Check if any AI provider is available
     if (!aiProviderService.isAnyProviderInitialized()) {
       addMultilingualPrompt(twiml, 'aiServiceError', selectedLangCode);
-      twiml.redirect(`${process.env.BASE_URL}/ivr/menu`);
+      twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
       return twiml.toString();
     }
 
-    // Say processing prompt
-    twiml.say(
-      getPrompt('processingQuestion', selectedLangCode),
-      voiceConfig
-    );
+    addMultilingualPrompt(twiml, 'processingQuestion', selectedLangCode);
 
-    // Get user's language from session
-    const questionLanguage = session.questionLanguage || 'en';
-    const detectedLanguageCode = session.detectedLanguageCode || 'en-US';
-    const langCode = selectedLangCode.split('-')[0];
-    console.log(`🌐 Language Info: Selected="${selectedLangCode}", Detected="${detectedLanguageCode}", Code="${questionLanguage}"`);
-
-    // Generate answer from AI
     console.log(`🤖 Sending to AI (${aiProviderService.getActiveProvider()}): ${question}`);
-    const answerEnglishRaw = await aiProviderService.generateAnswer(question);
-    // Strip markdown formatting to prevent TTS reading "asterisk asterisk"
-    const answerEnglish = stripMarkdown(answerEnglishRaw);
-    console.log(`🤖 Answer (English, cleaned): ${answerEnglish.substring(0, 100)}...`);
+    const answerEnglish = await aiProviderService.generateAnswer(question);
+    console.log(`🤖 Answer (English): ${answerEnglish}`);
 
     // Broadcast answer generated (non-blocking)
     try {
       broadcastAnswerGenerated(callSid, answerEnglish, 'General');
     } catch (error) { /* Silent fail */ }
 
+    // Get user's language from session
+    const questionLanguage = session.questionLanguage || 'en';
+    const detectedLanguageCode = session.detectedLanguageCode || 'en-US';
+    console.log(`🌐 Language Info: Detected="${detectedLanguageCode}", Code="${questionLanguage}"`);
+
     // Translate answer back to user's language if needed
     let answerInUserLanguage = answerEnglish;
-    if (langCode !== 'en') {
-      console.log(`🌐 Translating answer: English → ${langCode}...`);
-      try {
-        const translationPromise = translateText(answerEnglish, langCode, 'en');
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Translation timeout')), 10000)
-        );
-        answerInUserLanguage = await Promise.race([translationPromise, timeoutPromise]);
-        console.log(`📝 Answer (${langCode}): ${answerInUserLanguage.substring(0, 100)}...`);
-      } catch (error) {
-        console.error(`⚠️ Translation failed (${error.message}), using English`);
-        answerInUserLanguage = answerEnglish;
-      }
+    if (questionLanguage !== 'en') {
+      console.log(`🌐 Translating answer: English → ${questionLanguage}...`);
+      answerInUserLanguage = await translateText(answerEnglish, questionLanguage, 'en');
+      console.log(`📝 Answer (${questionLanguage}): ${answerInUserLanguage}`);
     } else {
       console.log(`✅ Answer is already in English, no translation needed`);
     }
@@ -608,10 +568,11 @@ async function getAnswer(callSid, req) {
     session.lastAnswerTranslated = answerInUserLanguage;
     userSessions.set(callSid, session);
 
-    // Classify and store in DB (non-blocking fire-and-forget)
+    // Classify and store in DB (non-blocking - don't await to avoid timeout)
     if (isConnected()) {
       storeQuestionAndAnswer(session.fromNumber, question, answerEnglish).then(() => {
         console.log(`✅ Q&A stored in database`);
+        // Broadcast Q&A saved (non-blocking)
         try {
           broadcastQASaved({
             callSid,
@@ -627,20 +588,19 @@ async function getAnswer(callSid, req) {
       });
     }
 
-    // Convert translated answer to speech
-    console.log(`🎤 Converting to speech: Language="${selectedLangCode}"`);
+    // Convert translated answer to speech in user's language
+    console.log(`🎤 Converting to speech: Language="${detectedLanguageCode}"`);
     const audioFileName = await textToSpeechConvert(
       answerInUserLanguage,
       callSid,
-      selectedLangCode
+      detectedLanguageCode
     );
 
     if (audioFileName) {
       const audioUrl = `${process.env.BASE_URL}/audio/${audioFileName}`;
-      console.log(`▶️ Playing answer audio: ${audioUrl}`);
+      console.log(`▶️ Playing audio in ${detectedLanguageCode}: ${audioUrl}`);
       twiml.play(audioUrl);
     } else {
-      // Fallback to Twilio TTS
       console.log(`⚠️ Using Twilio TTS fallback in English`);
       twiml.say(answerEnglish, { voice: 'Polly.Joanna', language: 'en-US' });
     }
@@ -653,12 +613,15 @@ async function getAnswer(callSid, req) {
       timeout: 10
     });
 
-    addMultilingualPrompt(gather, 'afterAnswer', selectedLangCode, { loop: 2 });
+    gather.say(
+      getPrompt('afterAnswer', selectedLangCode),
+      voiceConfig
+    );
 
   } catch (error) {
-    console.error('❌ Error getting answer from AI:', error);
+    console.error('Error getting answer from AI:', error);
     addMultilingualPrompt(twiml, 'generalError', selectedLangCode);
-    twiml.redirect(`${process.env.BASE_URL}/ivr/menu`);
+    twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
   }
 
   return twiml.toString();
@@ -817,9 +780,8 @@ app.post('/ivr/process-summary', async (req, res) => {
 
     // Generate summary using AI provider
     console.log(`🤖 Generating summary for ${subjectName} with ${history.length} questions...`);
-    const summaryRaw = await aiProviderService.generateSummary(subjectName, history);
-    const summary = stripMarkdown(summaryRaw);
-    console.log(`📊 Summary generated successfully (markdown stripped)`);
+    const summary = await aiProviderService.generateSummary(subjectName, history);
+    console.log(`📊 Summary generated successfully`);
 
     // Convert summary to speech
     const audioFileName = await textToSpeechConvert(summary, callSid);
@@ -1141,10 +1103,8 @@ app.post('/ivr/chapter-recorded', async (req, res) => {
     }
 
     // Send only relevant chunks to LLM for chapter explanation
-    const explanationRaw = await aiProviderService.explainChapter(chapterRequestEnglish, relevantContent, mainFileName);
-    // Strip markdown formatting to prevent TTS reading "asterisk asterisk"
-    const explanation = stripMarkdown(explanationRaw);
-    console.log(`📖 Chapter explanation generated (${explanation.length} chars, markdown stripped)`);
+    const explanation = await aiProviderService.explainChapter(chapterRequestEnglish, relevantContent, mainFileName);
+    console.log(`📖 Chapter explanation generated (${explanation.length} chars)`);
 
     // Translate explanation back if needed
     let explanationInUserLang = explanation;
