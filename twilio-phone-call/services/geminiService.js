@@ -139,13 +139,13 @@ Give a short and simple summary of what the user has learned so far in ${subject
 
 /**
  * Explain a specific chapter from a book/document
- * Sends the FULL document content to the LLM and asks it to explain the requested chapter
+ * Uses relevant chunks retrieved via vector search (not the full document)
  * @param {string} chapterRequest - What the user asked (e.g., "explain chapter 3 of physics")
- * @param {string} fullContent - The entire document content from RAG
+ * @param {string} relevantContent - Relevant chunks from vector search
  * @param {string} fileName - The document filename for context
  * @returns {Promise<string>} AI-generated chapter explanation
  */
-async function explainChapter(chapterRequest, fullContent, fileName) {
+async function explainChapter(chapterRequest, relevantContent, fileName) {
   if (!model) {
     throw new Error('Gemini AI not initialized');
   }
@@ -154,17 +154,17 @@ async function explainChapter(chapterRequest, fullContent, fileName) {
 
 User's request: "${chapterRequest}"
 
-Here is the FULL content of the document "${fileName}":
+Here are the most relevant sections from the document "${fileName}" (retrieved via semantic search):
 ---
-${fullContent}
+${relevantContent}
 ---
 
 Instructions:
-1. Identify which chapter or section the user is referring to from the document above.
-2. Provide a clear, detailed explanation of that chapter's content.
-3. Break it down in a way that's easy to understand for a student.
+1. Based on the relevant sections above, explain what the user is asking about.
+2. Focus on the content that directly relates to the user's request.
+3. Provide a clear, detailed explanation that's easy to understand for a student.
 4. Keep the explanation suitable for voice response (clear, conversational, well-structured).
-5. If you cannot find the exact chapter, explain the closest matching section.
+5. If the relevant sections don't fully cover the topic, explain what's available and mention that.
 6. Keep the explanation under 500 words so it's not too long for voice playback.
 
 Explain:`;

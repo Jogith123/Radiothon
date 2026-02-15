@@ -57,6 +57,10 @@ async function initializeServices() {
   // Initialize MongoDB
   await connectToMongoDB();
 
+  // Initialize RAG embedding model for vector search
+  const { initializeEmbeddings } = require('./services/ragService');
+  initializeEmbeddings();
+
   // Initialize WebSocket on shared HTTP server (same port, path /ws)
   initializeWebSocket(server);
 
@@ -1033,9 +1037,8 @@ app.post('/ivr/chapter-recorded', async (req, res) => {
       console.log(`📝 Translated: "${chapterRequestEnglish}"`);
     }
 
-    // Get ALL documents from RAG and send full content to LLM
-    const { getLibrary } = require('./services/ragService');
-    const { getDatabase } = require('./database/connection');
+    // Check if RAG documents exist
+    const { getLibrary, vectorSearch } = require('./services/ragService');
     const library = await getLibrary();
 
     if (!library.documents || library.documents.length === 0) {
@@ -1052,30 +1055,41 @@ app.post('/ivr/chapter-recorded', async (req, res) => {
       voiceConfig
     );
 
-    // Get the full content of all documents (send entire content to LLM)
-    const db = getDatabase();
-    const col = db.collection('rag_documents');
-    const allDocs = await col.find({}, { projection: { fileName: 1, content: 1, subject: 1 } }).toArray();
+    // Use vector search to find relevant chunks (instead of sending full document)
+    const searchResults = await vectorSearch(chapterRequestEnglish, 15, 0.2);
 
-    // Combine all document contents
-    let fullContent = '';
+    let relevantContent = '';
     let mainFileName = '';
-    for (const doc of allDocs) {
-      fullContent += `\n\n=== Document: ${doc.fileName} (Subject: ${doc.subject || 'General'}) ===\n${doc.content}`;
-      if (!mainFileName) mainFileName = doc.fileName;
+
+    if (searchResults.results.length > 0) {
+      // Build context from relevant chunks only
+      for (const chunk of searchResults.results) {
+        relevantContent += `\n\n[${chunk.fileName} - ${chunk.chapterTitle}]:\n${chunk.content}`;
+        if (!mainFileName) mainFileName = chunk.fileName;
+      }
+      console.log(`📚 Vector search found ${searchResults.results.length} relevant chunks (${relevantContent.length} chars) from ${searchResults.totalChunksSearched} total chunks`);
+    } else {
+      // Fallback: if vector search finds nothing, try text search
+      console.log('⚠️ Vector search returned no results, trying text search fallback...');
+      const { searchDocuments } = require('./services/ragService');
+      const textResults = await searchDocuments(chapterRequestEnglish, 10, 0.1);
+      for (const chunk of textResults.results) {
+        relevantContent += `\n\n[${chunk.fileName} - ${chunk.chapterTitle}]:\n${chunk.content}`;
+        if (!mainFileName) mainFileName = chunk.fileName;
+      }
+      console.log(`📚 Text search fallback found ${textResults.results.length} chunks (${relevantContent.length} chars)`);
     }
 
-    // Truncate if too large (Gemini context limit ~1M tokens, but 50K chars is practical for quality)
-    const MAX_CONTENT_LENGTH = 50000;
-    if (fullContent.length > MAX_CONTENT_LENGTH) {
-      console.log(`⚠️ Content too large (${fullContent.length} chars), truncating to ${MAX_CONTENT_LENGTH}`);
-      fullContent = fullContent.substring(0, MAX_CONTENT_LENGTH) + '\n\n[Content truncated due to length...]';
+    if (!relevantContent) {
+      addMultilingualPrompt(twiml, 'noDocumentsUploaded', selectedLangCode);
+      twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
+      res.type('text/xml');
+      res.send(twiml.toString());
+      return;
     }
 
-    console.log(`📚 Sending ${allDocs.length} document(s) (${fullContent.length} chars) to LLM for chapter explanation`);
-
-    // Send full content to LLM for chapter explanation
-    const explanation = await aiProviderService.explainChapter(chapterRequestEnglish, fullContent, mainFileName);
+    // Send only relevant chunks to LLM for chapter explanation
+    const explanation = await aiProviderService.explainChapter(chapterRequestEnglish, relevantContent, mainFileName);
     console.log(`📖 Chapter explanation generated (${explanation.length} chars)`);
 
     // Translate explanation back if needed

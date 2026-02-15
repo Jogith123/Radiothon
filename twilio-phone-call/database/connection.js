@@ -46,6 +46,10 @@ async function createIndexes() {
     
     // Index for subject-specific queries
     await db.collection('history').createIndex({ user_id: 1, subject: 1, timestamp: -1 });
+
+    // Indexes for RAG chunks collection (vector search)
+    await db.collection('rag_chunks').createIndex({ docId: 1 });
+    await db.collection('rag_chunks').createIndex({ fileName: 1, chunkIndex: 1 });
   } catch (error) {
     console.error('❌ Error creating indexes:', error.message);
   }
