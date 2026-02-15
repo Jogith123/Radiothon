@@ -363,7 +363,7 @@ async function processTranscription(recordingUrl, callSid) {
     const session = userSessions.get(callSid) || {};
 
     // Get user's preferred language (default to English)
-    const userLanguage = session.language || 'en-US';
+    const userLanguage = session.selectedLanguage || 'en-US';
 
     // Transcribe with language specification
     const transcriptionResult = await transcribeAudio(recordingUrl, callSid, userLanguage);
@@ -413,7 +413,7 @@ async function processTranscription(recordingUrl, callSid) {
 async function processFollowupTranscription(recordingUrl, callSid) {
   try {
     const session = userSessions.get(callSid) || {};
-    const userLanguage = session.language || 'en-US';
+    const userLanguage = session.selectedLanguage || 'en-US';
 
     // Transcribe the additional details
     const transcriptionResult = await transcribeAudio(recordingUrl, callSid, userLanguage);
@@ -1340,7 +1340,7 @@ app.get('/api/calls/active', (req, res) => {
         callSid,
         fromNumber: session.fromNumber,
         state: session.state,
-        language: session.detectedLanguageCode || session.language,
+        language: session.detectedLanguageCode || session.selectedLanguage,
         currentQuestion: session.currentQuestion,
         questionCount: session.questions?.length || 0
       });
