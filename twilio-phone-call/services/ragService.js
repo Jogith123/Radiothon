@@ -22,21 +22,12 @@ let embeddingModel = null;
 
 /**
  * Initialize the Gemini embedding model
+ * DISABLED: Current SDK version doesn't support embedContent API properly
+ * Using text-based search instead which is fast and effective for chunked documents
  */
 function initializeEmbeddings() {
-  try {
-    if (process.env.GEMINI_API_KEY) {
-      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-      embeddingModel = genAI.getGenerativeModel({ model: 'embedding-001' });
-      console.log('✅ Gemini embedding model initialized (embedding-001)');
-      return true;
-    }
-    console.log('⚠️  GEMINI_API_KEY not found - embeddings disabled');
-    return false;
-  } catch (error) {
-    console.error('❌ Embedding model init failed:', error.message);
-    return false;
-  }
+  console.log('ℹ️  Vector embeddings disabled - using text-based semantic search');
+  return false;
 }
 
 // ========================================
@@ -201,63 +192,36 @@ async function uploadDocument(fileName, content, subject = 'General', fileType =
   const result = await docCol.insertOne(doc);
   const docId = result.insertedId;
 
-  // Generate embeddings for all chunks
-  let hasEmbeddings = false;
-  try {
-    console.log(`🔮 Generating vector embeddings for ${chunks.length} chunks...`);
-    const embeddings = await generateBatchEmbeddings(chunks);
-
-    // Determine chapter for each chunk based on position
-    const chunkDocs = chunks.map((chunkText, i) => {
-      let chapterTitle = 'General';
-      if (chapters.length > 0) {
-        // Approximate character position
-        const approxPos = content.indexOf(chunkText.substring(0, 80));
-        for (let c = chapters.length - 1; c >= 0; c--) {
-          if (approxPos >= chapters[c].position) {
-            chapterTitle = chapters[c].title;
-            break;
-          }
+  // Store chunks (without embeddings - using text-based search)
+  const chunkDocs = chunks.map((chunkText, i) => {
+    let chapterTitle = 'General';
+    if (chapters.length > 0) {
+      // Approximate character position
+      const approxPos = content.indexOf(chunkText.substring(0, 80));
+      for (let c = chapters.length - 1; c >= 0; c--) {
+        if (approxPos >= chapters[c].position) {
+          chapterTitle = chapters[c].title;
+          break;
         }
       }
-
-      return {
-        docId,
-        fileName,
-        subject,
-        chunkIndex: i,
-        content: chunkText,
-        chapterTitle,
-        embedding: embeddings[i],
-        createdAt: new Date()
-      };
-    });
-
-    // Insert all chunks with embeddings
-    if (chunkDocs.length > 0) {
-      await chunkCol.insertMany(chunkDocs);
-      hasEmbeddings = true;
-      console.log(`✅ Stored ${chunkDocs.length} chunks with vector embeddings`);
     }
 
-    // Update document to mark embeddings complete
-    await docCol.updateOne({ _id: docId }, { $set: { hasEmbeddings: true } });
-  } catch (embErr) {
-    console.error(`⚠️ Embedding generation failed (document still stored without vectors):`, embErr.message);
-    // Store chunks without embeddings as fallback
-    const fallbackChunks = chunks.map((chunkText, i) => ({
+    return {
       docId,
       fileName,
       subject,
       chunkIndex: i,
       content: chunkText,
-      chapterTitle: 'General',
-      embedding: null,
+      chapterTitle,
+      embedding: null, // No embeddings - using text search
       createdAt: new Date()
-    }));
-    if (fallbackChunks.length > 0) {
-      await chunkCol.insertMany(fallbackChunks);
-    }
+    };
+  });
+
+  // Insert all chunks
+  if (chunkDocs.length > 0) {
+    await chunkCol.insertMany(chunkDocs);
+    console.log(`✅ Stored ${chunkDocs.length} chunks for text-based search`);
   }
 
   return {
@@ -268,7 +232,7 @@ async function uploadDocument(fileName, content, subject = 'General', fileType =
     totalChunks: chunks.length,
     contentLength: content.length,
     chapters: chapters.length,
-    hasEmbeddings
+    hasEmbeddings: false
   };
 }
 
@@ -286,51 +250,57 @@ async function uploadDocument(fileName, content, subject = 'General', fileType =
 async function vectorSearch(query, topK = 10, minSimilarity = 0.3) {
   const chunkCol = getChunkCollection();
 
-  // Generate query embedding
-  console.log(`🔍 Vector search for: "${query}"`);
-  const queryEmbedding = await generateEmbedding(query);
+  try {
+    // Generate query embedding
+    console.log(`🔍 Vector search for: "${query}"`);
+    const queryEmbedding = await generateEmbedding(query);
 
-  // Fetch all chunks that have embeddings
-  const allChunks = await chunkCol.find(
-    { embedding: { $ne: null } },
-    { projection: { content: 1, embedding: 1, fileName: 1, subject: 1, chapterTitle: 1, chunkIndex: 1, docId: 1 } }
-  ).toArray();
+    // Fetch all chunks that have embeddings
+    const allChunks = await chunkCol.find(
+      { embedding: { $ne: null } },
+      { projection: { content: 1, embedding: 1, fileName: 1, subject: 1, chapterTitle: 1, chunkIndex: 1, docId: 1 } }
+    ).toArray();
 
-  if (allChunks.length === 0) {
-    console.log('⚠️ No vector-indexed chunks found');
+    if (allChunks.length === 0) {
+      console.log('⚠️ No vector-indexed chunks found');
+      return { success: true, query, results: [], totalMatches: 0 };
+    }
+
+    console.log(`📊 Comparing against ${allChunks.length} indexed chunks...`);
+
+    // Compute cosine similarity for each chunk
+    const scored = allChunks.map(chunk => ({
+      docId: chunk.docId.toString(),
+      fileName: chunk.fileName,
+      subject: chunk.subject,
+      chapterTitle: chunk.chapterTitle,
+      chunkIndex: chunk.chunkIndex,
+      content: chunk.content,
+      similarity: cosineSimilarity(queryEmbedding, chunk.embedding)
+    }));
+
+    // Sort by similarity descending
+    scored.sort((a, b) => b.similarity - a.similarity);
+
+    // Filter by minimum similarity and take top K
+    const results = scored
+      .filter(r => r.similarity >= minSimilarity)
+      .slice(0, topK);
+
+    console.log(`✅ Found ${results.length} relevant chunks (top similarity: ${results[0]?.similarity?.toFixed(3) || 'N/A'})`);
+
+    return {
+      success: true,
+      query,
+      results,
+      totalMatches: scored.filter(r => r.similarity >= minSimilarity).length,
+      totalChunksSearched: allChunks.length
+    };
+  } catch (error) {
+    // Embedding failed, return empty results to trigger text search fallback
+    console.log(`⚠️ Vector search failed (${error.message}), will fall back to text search`);
     return { success: true, query, results: [], totalMatches: 0 };
   }
-
-  console.log(`📊 Comparing against ${allChunks.length} indexed chunks...`);
-
-  // Compute cosine similarity for each chunk
-  const scored = allChunks.map(chunk => ({
-    docId: chunk.docId.toString(),
-    fileName: chunk.fileName,
-    subject: chunk.subject,
-    chapterTitle: chunk.chapterTitle,
-    chunkIndex: chunk.chunkIndex,
-    content: chunk.content,
-    similarity: cosineSimilarity(queryEmbedding, chunk.embedding)
-  }));
-
-  // Sort by similarity descending
-  scored.sort((a, b) => b.similarity - a.similarity);
-
-  // Filter by minimum similarity and take top K
-  const results = scored
-    .filter(r => r.similarity >= minSimilarity)
-    .slice(0, topK);
-
-  console.log(`✅ Found ${results.length} relevant chunks (top similarity: ${results[0]?.similarity?.toFixed(3) || 'N/A'})`);
-
-  return {
-    success: true,
-    query,
-    results,
-    totalMatches: scored.filter(r => r.similarity >= minSimilarity).length,
-    totalChunksSearched: allChunks.length
-  };
 }
 
 // ========================================
