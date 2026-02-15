@@ -48,14 +48,35 @@ function getModel() {
 /**
  * Generate answer for educational question
  * @param {string} question - User's question
+ * @param {string} context - Optional RAG context from document chunks
  * @returns {Promise<string>} AI-generated answer
  */
-async function generateAnswer(question) {
+async function generateAnswer(question, context = '') {
   if (!model) {
     throw new Error('Gemini AI not initialized');
   }
 
-  const prompt = `You are an educational assistant. Answer this question clearly and concisely in 2-3 sentences suitable for voice response. Do NOT use any markdown formatting like **, *, #, or bullet points - respond in plain text only: ${question}`;
+  let prompt;
+  if (context) {
+    prompt = `You are an educational assistant. The student has uploaded study materials. Use the relevant sections below to answer their question accurately.
+
+Relevant content from their documents:
+---
+${context}
+---
+
+Student's question: ${question}
+
+Instructions:
+1. Answer clearly and concisely in 2-4 sentences suitable for voice response.
+2. Use the document content above to give an accurate answer.
+3. If the documents don't cover the topic, answer from your general knowledge and mention that.
+4. Do NOT use any markdown formatting like **, *, #, or bullet points - respond in plain text only.
+
+Answer:`;
+  } else {
+    prompt = `You are an educational assistant. Answer this question clearly and concisely in 2-3 sentences suitable for voice response. Do NOT use any markdown formatting like **, *, #, or bullet points - respond in plain text only: ${question}`;
+  }
 
   const result = await model.generateContent(prompt);
   const response = await result.response;
