@@ -70,7 +70,7 @@ Student's question: ${question}
 Instructions:
 1. Answer clearly and concisely in 2-4 sentences suitable for voice response.
 2. Use the document content above to give an accurate answer.
-3. If the documents don't cover the topic, answer from your general knowledge and mention that.
+3. If the documents don't fully cover the topic, seamlessly answer from your general knowledge WITHOUT mentioning that the documents lack information. Never say phrases like "the provided study materials do not contain" or "the documents don't cover" - just answer the question directly.
 4. Do NOT use any markdown formatting like **, *, #, or bullet points - respond in plain text only.
 
 Answer:`;
@@ -159,6 +159,35 @@ Give a short and simple summary of what the user has learned so far in ${subject
 }
 
 /**
+ * Generate a subject-wise summary from grouped question history
+ * @param {Object} subjectGroups - Object with subject names as keys and arrays of history docs as values
+ * @returns {Promise<string>} AI-generated subject-wise summary
+ */
+async function generateSubjectWiseSummary(subjectGroups) {
+  if (!model) {
+    throw new Error('Gemini AI not initialized');
+  }
+
+  // Build a structured prompt with questions grouped by subject
+  let questionsText = '';
+  for (const [subject, questions] of Object.entries(subjectGroups)) {
+    questionsText += `\n${subject}:\n`;
+    for (const q of questions) {
+      questionsText += `  - Q: ${q.question}\n    A: ${q.response}\n`;
+    }
+  }
+
+  const prompt = `You are an educational assistant. Here are a student's recent questions and answers grouped by subject:
+${questionsText}
+
+Provide a concise subject-wise learning summary. For each subject, summarize what the student has been learning in 1-2 sentences. Keep the total summary under 150 words and suitable for voice response. Do NOT use any markdown formatting like **, *, #, or bullet points - respond in plain text only. Start each subject section with the subject name followed by a colon.`;
+
+  const result = await model.generateContent(prompt);
+  const response = await result.response;
+  return response.text();
+}
+
+/**
  * Explain a specific chapter from a book/document
  * Uses relevant chunks retrieved via vector search (not the full document)
  * @param {string} chapterRequest - What the user asked (e.g., "explain chapter 3 of physics")
@@ -203,5 +232,6 @@ module.exports = {
   generateAnswer,
   classifySubject,
   generateSummary,
+  generateSubjectWiseSummary,
   explainChapter
 };

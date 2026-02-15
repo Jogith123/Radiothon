@@ -119,6 +119,25 @@ async function explainChapter(chapterRequest, fullContent, fileName) {
   }
 }
 
+async function generateSubjectWiseSummary(subjectGroups) {
+  try {
+    if (activeProvider === 'gemini' && geminiService.isInitialized()) {
+      return await geminiService.generateSubjectWiseSummary(subjectGroups);
+    }
+    
+    // Fallback: flatten groups and use regular summary
+    if (openaiService.isInitialized()) {
+      const allQuestions = Object.values(subjectGroups).flat();
+      return await openaiService.generateSummary('All Subjects', allQuestions);
+    }
+    
+    throw new Error('No AI provider is initialized');
+  } catch (error) {
+    console.error('Error generating subject-wise summary:', error);
+    throw error;
+  }
+}
+
 function isAnyProviderInitialized() {
   if (activeProvider === 'gemini' && geminiService.isInitialized()) return true;
   if (openaiService.isInitialized()) return true;
@@ -132,5 +151,6 @@ module.exports = {
   generateAnswer,
   classifySubject,
   generateSummary,
+  generateSubjectWiseSummary,
   explainChapter
 };

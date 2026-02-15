@@ -11,7 +11,6 @@ import autoTable from 'jspdf-autotable';
 
 import { PageHeader, Button } from '../components/common';
 import HeroMetricsGrid from '../components/dashboard/HeroMetricsGrid';
-import PipelineVisualizer from '../components/dashboard/PipelineVisualizer';
 import ActivityFeed from '../components/dashboard/ActivityFeed';
 import ChartsSection from '../components/dashboard/ChartsSection';
 
@@ -106,7 +105,6 @@ const Dashboard = () => {
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8">
                 <div className="xl:col-span-2">
-                    <PipelineVisualizer />
                     <ChartsSection />
                 </div>
                 <div className="xl:col-span-1">

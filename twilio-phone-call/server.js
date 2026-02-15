@@ -785,9 +785,9 @@ async function getAnswer(callSid, req) {
   return twiml.toString();
 }
 
-// Get summary of last 5 questions for a subject
+// Get subject-wise summary of last 5 questions (automatic - no recording needed)
 async function getSummary(callSid, req) {
-  console.log(`📊 Getting summary for call: ${callSid}`);
+  console.log(`📊 Getting subject-wise summary for call: ${callSid}`);
   const session = userSessions.get(callSid) || {};
   const fromNumber = session.fromNumber || req.body.From;
 
@@ -810,21 +810,68 @@ async function getSummary(callSid, req) {
       return twiml.toString();
     }
 
-    // Ask user for subject
+    // Fetch the last 5 questions for this user (all subjects)
+    const { getRecentHistory } = require('./services/historyService');
+    const recentHistory = await getRecentHistory(fromNumber, 5);
+    console.log(`📊 Found ${recentHistory.length} recent questions for user: ${fromNumber}`);
+
+    if (recentHistory.length === 0) {
+      twiml.say(
+        getPrompt('noSummary', selectedLangCode, { subject: 'any subject' }),
+        voiceConfig
+      );
+      twiml.redirect(`${process.env.BASE_URL}/ivr/welcome`);
+      return twiml.toString();
+    }
+
+    // Group questions by subject
+    const subjectGroups = {};
+    for (const item of recentHistory) {
+      const subj = item.subject || 'General';
+      if (!subjectGroups[subj]) {
+        subjectGroups[subj] = [];
+      }
+      subjectGroups[subj].push(item);
+    }
+
+    const subjectNames = Object.keys(subjectGroups);
+    console.log(`📚 Subjects found: ${subjectNames.join(', ')}`);
+
+    // Generate subject-wise summary using AI
+    const summaryRaw = await aiProviderService.generateSubjectWiseSummary(subjectGroups);
+    const summary = stripMarkdown(summaryRaw);
+    console.log(`📊 Subject-wise summary generated (${summary.length} chars, markdown stripped)`);
+
+    // Say intro
     twiml.say(
-      getPrompt('summaryRequest', selectedLangCode),
+      `Here is your learning summary based on your last ${recentHistory.length} questions across ${subjectNames.length} subject${subjectNames.length > 1 ? 's' : ''}.`,
       voiceConfig
     );
 
-    // Record the subject name
-    twiml.record({
-      action: `${process.env.BASE_URL}/ivr/process-summary`,
+    twiml.pause({ length: 1 });
+
+    // Convert summary to speech
+    const audioFileName = await textToSpeechConvert(summary, callSid);
+
+    if (audioFileName) {
+      const audioUrl = `${process.env.BASE_URL}/audio/${audioFileName}`;
+      twiml.play(audioUrl);
+    } else {
+      twiml.say(summary, { voice: 'Polly.Joanna', language: 'en-US' });
+    }
+
+    // Offer next options
+    const gather = twiml.gather({
+      action: `${process.env.BASE_URL}/ivr/menu`,
+      numDigits: '1',
       method: 'POST',
-      maxLength: 10,
-      finishOnKey: '#',
-      transcribe: false,
-      playBeep: true
+      timeout: 10
     });
+
+    gather.say(
+      getPrompt('afterSummary', selectedLangCode),
+      voiceConfig
+    );
 
   } catch (error) {
     console.error('Error in getSummary:', error);
@@ -1419,6 +1466,13 @@ function pauseExplanation(callSid, req) {
   const segIdx = session.currentSegmentIndex || 0;
   const totalSegs = session.explanationSegments?.length || 0;
   console.log(`⏸️ Paused at segment ${segIdx + 1}/${totalSegs}`);
+
+  // Advance to next segment so resume doesn't replay the interrupted segment
+  if (totalSegs > 0 && segIdx < totalSegs - 1) {
+    session.currentSegmentIndex = segIdx + 1;
+    userSessions.set(callSid, session);
+    console.log(`⏭️ Resume will start from segment ${segIdx + 2}/${totalSegs}`);
+  }
 
   // Tell user it's paused and they can take notes
   addMultilingualPrompt(twiml, 'pausedExplanation', selectedLangCode);
