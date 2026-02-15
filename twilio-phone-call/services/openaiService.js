@@ -18,7 +18,7 @@ function initializeOpenAI() {
                 apiKey: process.env.OPENAI_API_KEY
             });
             isInitializedFlag = true;
-            const model = process.env.OPENAI_MODEL || 'gpt-5.1';
+            const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
             console.log(`✅ OpenAI initialized (using ${model})`);
             return true;
         } else {
@@ -58,7 +58,7 @@ async function generateAnswer(question, context = '') {
         throw new Error('OpenAI not initialized');
     }
 
-    const model = process.env.OPENAI_MODEL || 'gpt-5.1';
+    const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
     let systemPrompt;
     let userPrompt;
@@ -107,7 +107,7 @@ async function classifySubject(question) {
     }
 
     try {
-        const model = process.env.OPENAI_MODEL || 'gpt-5.1';
+        const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
         const completion = await openai.chat.completions.create({
             model: model,
@@ -167,7 +167,7 @@ async function generateSummary(subjectName, history) {
         throw new Error('OpenAI not initialized');
     }
 
-    const model = process.env.OPENAI_MODEL || 'gpt-5.1';
+    const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
     const questionsAndAnswers = history
         .map((x, i) => `${i + 1}. Q: ${x.question}\nA: ${x.response}`)
@@ -202,7 +202,7 @@ async function generateSubjectWiseSummary(subjectGroups) {
         throw new Error('OpenAI not initialized');
     }
 
-    const model = process.env.OPENAI_MODEL || 'gpt-5.1';
+    const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
     // Build a structured prompt with questions grouped by subject
     let questionsText = '';
@@ -245,7 +245,7 @@ async function explainChapter(chapterRequest, relevantContent, fileName) {
         throw new Error('OpenAI not initialized');
     }
 
-    const model = process.env.OPENAI_MODEL || 'gpt-5.1';
+    const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
     const completion = await openai.chat.completions.create({
         model: model,
