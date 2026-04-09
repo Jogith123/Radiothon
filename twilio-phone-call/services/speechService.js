@@ -215,42 +215,46 @@ async function transcribeAudio(recordingUrl, callSid, languageCode = 'te-IN') {
         // Sort by confidence descending
         languageResults.sort((a, b) => b.confidence - a.confidence);
 
-        // Use the highest confidence result if it's significantly confident
-        // Require at least 0.5 confidence to avoid false positives
-        const MIN_CONFIDENCE_THRESHOLD = 0.5;
-        const CONFIDENCE_GAP_THRESHOLD = 0.15; // Difference needed to override English default
+        const MIN_CONFIDENCE_THRESHOLD = 0.5; // Lowered to 0.5 to catch more Telugu
+        const PREFERENCE_BOOST = 0.2; // Boost for user's selected language
+
+        // Apply preference boost if user selected a specific language
+        // This helps when Telugu audio is misdetected as Hindi
+        if (languageCode && languageCode !== 'en-US') {
+          const preferredResult = languageResults.find(r => r.lang === languageCode);
+          if (preferredResult) {
+            console.log(`🎯 Applying +${PREFERENCE_BOOST} boost to user's selected language: ${languageCode}`);
+            preferredResult.confidence += PREFERENCE_BOOST;
+            // Re-sort after boost
+            languageResults.sort((a, b) => b.confidence - a.confidence);
+          }
+        }
 
         const topResult = languageResults[0];
         const secondResult = languageResults[1] || { confidence: 0 };
+        const confidenceGap = topResult.confidence - secondResult.confidence;
 
-        // If English has decent confidence (>0.6), prefer it
-        const englishResult = languageResults.find(r => r.lang === 'en-US');
-
-        if (englishResult && englishResult.confidence >= 0.6) {
-          // Strong English confidence - use it
-          bestTranscription = englishResult.text;
-          detectedLanguage = englishResult.lang;
-          bestConfidence = englishResult.confidence;
-          console.log(`✅ Selected English (strong confidence: ${englishResult.confidence.toFixed(2)})`);
-        } else if (topResult.confidence >= MIN_CONFIDENCE_THRESHOLD &&
-          (topResult.confidence - secondResult.confidence) >= CONFIDENCE_GAP_THRESHOLD) {
-          // Clear winner with good confidence
+        // Simply use the highest confidence result if it's above threshold
+        if (topResult.confidence >= MIN_CONFIDENCE_THRESHOLD) {
           bestTranscription = topResult.text;
           detectedLanguage = topResult.lang;
           bestConfidence = topResult.confidence;
-          console.log(`✅ Selected ${topResult.lang} (confidence: ${topResult.confidence.toFixed(2)}, gap: ${(topResult.confidence - secondResult.confidence).toFixed(2)})`);
-        } else if (englishResult) {
-          // Fallback to English if no clear winner
-          bestTranscription = englishResult.text;
-          detectedLanguage = englishResult.lang;
-          bestConfidence = englishResult.confidence;
-          console.log(`✅ Defaulting to English (ambiguous results: top=${topResult.confidence.toFixed(2)}, gap=${(topResult.confidence - secondResult.confidence).toFixed(2)})`);
+          console.log(`✅ Selected ${topResult.lang} (confidence: ${topResult.confidence.toFixed(2)}, gap: ${confidenceGap.toFixed(2)})`);
         } else {
-          // No English result, use the best available
-          bestTranscription = topResult.text;
-          detectedLanguage = topResult.lang;
-          bestConfidence = topResult.confidence;
-          console.log(`✅ Using best available ${topResult.lang} (no English detected)`);
+          // Low confidence - default to English
+          const englishResult = languageResults.find(r => r.lang === 'en-US');
+          if (englishResult) {
+            bestTranscription = englishResult.text;
+            detectedLanguage = englishResult.lang;
+            bestConfidence = englishResult.confidence;
+            console.log(`✅ Defaulting to English (low confidence: top=${topResult.confidence.toFixed(2)})`);
+          } else {
+            // No English, use best available
+            bestTranscription = topResult.text;
+            detectedLanguage = topResult.lang;
+            bestConfidence = topResult.confidence;
+            console.log(`✅ Using best available ${topResult.lang} (no English detected)`);
+          }
         }
 
         // Assign the selected transcription to the result variable
